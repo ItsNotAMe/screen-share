@@ -228,7 +228,11 @@ as specified by [Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/
 Unknown engine periods are reported as zero, not inferred from buffer capacity.
 Capture delay is an estimate, not a measured capture-to-speaker latency.
 
-In session integration, SwitchablePcmCapture automatically retries committed
+In session integration, SwitchablePcmCapture starts the PCM timeline while its
+producer opens the initial host audio endpoint. It sends paced silence until
+audio is available, so even a slow audio open does not delay video negotiation.
+The initial deadline includes time spent opening the device. SwitchablePcmCapture
+automatically retries committed
 System/Microphone factories after activation/read failure or five seconds without
 fresh PCM, with 250 ms–5 s capped
 backoff and paced silence on the existing 10 ms output timeline. Recovery opens

@@ -89,6 +89,7 @@ void Switches() {
     // Recording can restart after its last viewer leaves; successful selection persists.
     capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
     Require(control->Status().revision == 4 && control->Status().selected.kind == AudioKind::Microphone, "Selection lost on recording restart");
+    capture_audio_recovery_test::Pump(*capture, block, [&] { return control->Status().health.state == AudioEndpointState::Running; });
     Require(processors == 4, "Microphone processor was nested or reused on restart");
     for (auto selection : {AudioSelection{AudioKind::None}, AudioSelection{}, AudioSelection{AudioKind::Process, {}, 1}}) {
         auto bypass = control->Submit(selection, good); pump(bypass);
@@ -456,8 +457,9 @@ void AudioRecovery() {
     auto ownership = std::make_shared<Ownership>(); ownership->unavailable = true;
     AudioSwitchControl::Factory factory = [ownership] { return std::make_unique<OwnedCapture>(ownership, false); };
     auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, factory);
-    auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    auto capture = std::make_unique<SwitchablePcmCapture>(control, [] { return std::chrono::steady_clock::time_point{}; }); capture->Start();
     PcmBlock block;
+    capture_audio_recovery_test::Pump(*capture, block, [&] { return control->Status().health.state == AudioEndpointState::Failed; });
     Require(control->Status().health.state == AudioEndpointState::Failed && control->Status().health.failures == 1 && ownership->live == 0,
         "Initial capture failure was hidden or retained its endpoint");
     for (int i = 0; i < 10; ++i) {

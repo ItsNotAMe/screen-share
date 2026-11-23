@@ -1,6 +1,7 @@
 #pragma once
 #include "media/audio/SwitchablePcmCapture.h"
 #include <atomic>
+#include <condition_variable>
 #include <iostream>
 #include <source_location>
 
@@ -53,6 +54,34 @@ template<class Predicate> void Pump(SwitchablePcmCapture& capture, PcmBlock& blo
         Check(capture.Read(block, {}));
     }
 }
+inline void InitialActivation() {
+    auto evidence = std::make_shared<Evidence>();
+    evidence->blockActivation = true;
+    const AudioSelection selection{AudioKind::System, L"pinned-at-start"};
+    auto control = std::make_shared<AudioSwitchControl>(selection, [evidence] { return std::make_unique<Capture>(evidence); });
+    auto now = std::chrono::steady_clock::time_point{};
+    {
+        SwitchablePcmCapture capture(control, [&] { return now; });
+        capture.Start();
+        PcmBlock block{};
+        Pump(capture, block, [&] { return evidence->activating.load(); });
+        now += 4999ms;
+        Check(capture.Read(block, {}) && block == PcmBlock{} && evidence->live == 1 &&
+            control->Status().health.state == AudioEndpointState::Inactive);
+        now += 1ms;
+        Check(capture.Read(block, {}) && block == PcmBlock{} && evidence->live == 0 &&
+            control->Status().health.state == AudioEndpointState::Failed);
+
+        evidence->blockActivation = false;
+        evidence->unavailable = false;
+        now += 250ms;
+        Pump(capture, block, [&] { return block.front() == evidence->marker; });
+        const auto status = control->Status();
+        Check(evidence->created == 2 && status.health.state == AudioEndpointState::Running &&
+            status.health.failures == 1 && status.selected == selection && status.revision == 1);
+    }
+    Check(evidence->live == 0 && !evidence->wrongThread);
+}
 inline void Recovery() {
     for (const auto kind : {AudioKind::System, AudioKind::Microphone}) {
         auto evidence = std::make_shared<Evidence>();
@@ -62,8 +91,8 @@ inline void Recovery() {
         auto now = std::chrono::steady_clock::time_point{};
         {
             SwitchablePcmCapture capture(control, [&] { return now; }); capture.Start();
-            Check(control->Status().health.state == AudioEndpointState::Failed);
             PcmBlock block{};
+            Pump(capture, block, [&] { return control->Status().health.state == AudioEndpointState::Failed; });
             for (const auto delay : {250ms, 500ms, 1000ms, 2000ms, 4000ms, 5000ms, 5000ms}) {
                 const auto attempts = evidence->created.load();
                 now += delay - 1ms; Check(capture.Read(block, {}));
@@ -110,6 +139,7 @@ inline void OverridesAndTimeout() {
     auto control = std::make_shared<AudioSwitchControl>(AudioSelection{AudioKind::System, L"pinned"}, factory);
     auto capture = std::make_unique<SwitchablePcmCapture>(control, [&] { return now; }); capture->Start();
     PcmBlock block{};
+    Pump(*capture, block, [&] { return control->Status().health.state == AudioEndpointState::Failed; });
     evidence->unavailable = false; evidence->blockActivation = true; now += 250ms;
     Pump(*capture, block, [&] { return evidence->activating.load(); });
     const auto cancelledAt = std::chrono::steady_clock::now();
@@ -131,6 +161,7 @@ inline void OverridesAndTimeout() {
     evidence = std::make_shared<Evidence>();
     control = std::make_shared<AudioSwitchControl>(AudioSelection{}, [evidence] { return std::make_unique<Capture>(evidence); });
     capture = std::make_unique<SwitchablePcmCapture>(control, [&] { return now; }); capture->Start();
+    Pump(*capture, block, [&] { return control->Status().health.state == AudioEndpointState::Failed; });
     evidence->unavailable = false; evidence->blockRead = true; now += 250ms;
     Pump(*capture, block, [&] { return evidence->reading.load(); });
     now += 4999ms; Check(capture->Read(block, {}) && evidence->live == 1 && block.front() == 0);
@@ -150,6 +181,7 @@ inline void OverridesAndTimeout() {
     evidence = std::make_shared<Evidence>();
     control = std::make_shared<AudioSwitchControl>(AudioSelection{}, [evidence] { return std::make_unique<Capture>(evidence); });
     capture = std::make_unique<SwitchablePcmCapture>(control, [&] { return now; }); capture->Start();
+    Pump(*capture, block, [&] { return control->Status().health.state == AudioEndpointState::Failed; });
     evidence->blockActivation = true; now += 250ms;
     Pump(*capture, block, [&] { return evidence->activating.load(); });
     control->Close(); now += 1h; Check(capture->Read(block, {}));
@@ -162,7 +194,9 @@ inline void ExcludedSelections() {
         auto evidence = std::make_shared<Evidence>();
         auto control = std::make_shared<AudioSwitchControl>(selection, [evidence] { return std::make_unique<Capture>(evidence); });
         SwitchablePcmCapture capture(control, [&] { return now; }); capture.Start();
-        now += 1h; PcmBlock block{};
+        PcmBlock block{};
+        Pump(capture, block, [&] { return control->Status().health.state == AudioEndpointState::Failed; });
+        now += 1h;
         for (int i = 0; i < 5; ++i) Check(capture.Read(block, {}) && block.front() == 0);
         Check(evidence->created == 1 && evidence->live == 0);
     }
@@ -249,7 +283,7 @@ inline void MissingPcm() {
     }
 }
 inline void Run() {
-    MissingPcm(); Recovery(); OverridesAndTimeout(); ExcludedSelections();
+    InitialActivation(); MissingPcm(); Recovery(); OverridesAndTimeout(); ExcludedSelections();
     std::cout << "Host audio recovery: initial/established/switched PCM stalls, fresh silence, capped retries, pinned targets, microphone processor renewal, mute/change/close priority and activation timeout passed.\n";
 }
 }

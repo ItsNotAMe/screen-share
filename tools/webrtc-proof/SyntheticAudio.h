@@ -15,6 +15,7 @@ struct AudioEvidence {
     std::atomic<uint64_t> audibleBlocks{0}, playedBlocks{0}, quietStreak{0};
     std::atomic<int> lastPeak{0};
     std::atomic<bool> captureUnavailable{false}, outputUnavailable{false};
+    std::atomic<bool> holdCaptureActivation{false}, captureActivating{false};
     std::atomic<unsigned> captureStarts{0}, outputStarts{0};
     std::atomic<unsigned> liveCaptures{0}, liveOutputs{0};
     std::atomic<uint64_t> outputRoute{0}, captureRoute{0};
@@ -28,6 +29,18 @@ public:
         route_ = evidence_ ? evidence_->captureRoute.load() : 0;
         if (evidence_) { ++evidence_->captureStarts; if (evidence_->captureUnavailable) throw std::runtime_error("Injected capture startup failure"); }
         next_ = std::chrono::steady_clock::now();
+    }
+    void Start(std::stop_token stop) override {
+        if (evidence_ && evidence_->holdCaptureActivation) {
+            evidence_->captureActivating = true;
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+            while (evidence_->holdCaptureActivation && !stop.stop_requested() && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            evidence_->captureActivating = false;
+            if (evidence_->holdCaptureActivation || stop.stop_requested())
+                throw std::runtime_error("Injected capture activation deadline");
+        }
+        Start();
     }
     bool Read(screenshare::media::PcmBlock& block, std::stop_token stop) override {
         if (evidence_ && evidence_->captureUnavailable) throw std::runtime_error("Injected capture device loss");

@@ -7,6 +7,15 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-23 host audio startup: begin the PCM timeline while the existing producer
+opens the initial device. WebRTC can start video and send paced silence while
+activation is pending. The five-second missing-audio deadline now includes the
+initial open. The selected source and revision survive timed-out activation and
+retry. Native endpoints must cooperate with cancellation. A loopback test holds
+initial activation until the viewer receives video, then checks audible PCM on
+the same connection. The old path stalls that video. Clock-supplied tests also
+cover timed-out initial activation and retry with the pinned device.
+
 2026-11-23 first media offer: an admitted viewer waits in AwaitingOffer while
 the host prepares capture. The first offer arms the viewer's 20-second media
 connection deadline once. Membership and signaling still govern departure and

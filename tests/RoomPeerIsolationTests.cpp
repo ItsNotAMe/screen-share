@@ -68,8 +68,14 @@ int main(int argc, char** argv) {
             wait([&] { return std::chrono::steady_clock::now() >= idleUntil; });
             const auto idleFrames = hostEvidence->capture->captured.load() - idleStart;
             Check(!hostEvidence->captureDemand->load() && idleFrames >= 3 && idleFrames <= 8);
+            hostEvidence->audio->holdCaptureActivation = true;
             run([&] { Check(host->Add("healthy")); Check(healthy->Add("host")); });
             wait([&] { return evidence->frames >= 5; });
+            if (!hostEvidence->audio->captureActivating)
+                throw std::runtime_error("Initial host audio activation held up the viewer's video");
+            Check(evidence->audio->audibleBlocks == 0);
+            hostEvidence->audio->holdCaptureActivation = false;
+            wait([&] { return evidence->audio->audibleBlocks >= 10; });
             if (!hostEvidence->captureDemand->load())
                 throw std::runtime_error("Connected video did not restore full capture demand");
             wait([&] { return evidence->frames >= 30; });
@@ -172,7 +178,7 @@ int main(int argc, char** argv) {
             wait([&] { return !hostEvidence->captureDemand->load(); });
             stop();
             Check(!hostEvidence->captureDemand->load() && hostEvidence->capture->sources == 0 && hostEvidence->capture->resources == 0);
-            std::cout << "{\"passed\":true,\"unconnected_peer_capture_isolated\":true,\"idle_capture_frames\":" << idleFrames
+            std::cout << "{\"passed\":true,\"host_audio_activation_isolated\":true,\"unconnected_peer_capture_isolated\":true,\"idle_capture_frames\":" << idleFrames
                 << ",\"paused_capture_frames\":" << pausedFrames << ",\"idle_demand_audio_resume\":true}\n";
         } catch (...) { stop(); throw; }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }

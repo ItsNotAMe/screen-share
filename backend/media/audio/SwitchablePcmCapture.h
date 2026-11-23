@@ -3,7 +3,6 @@
 #include "SilentPcmCapture.h"
 #include "AudioThreadTask.h"
 #include "media/AudioSelection.h"
-#include <condition_variable>
 #include <algorithm>
 #include <optional>
 #include <mutex>
@@ -37,6 +36,13 @@ public:
     }
     void Detach() { std::lock_guard lock(mutex_); active_ = false; status_.health.state = AudioEndpointState::Inactive; CancelQueued(); }
     void Close() { std::lock_guard lock(mutex_); closed_ = true; status_.health.state = AudioEndpointState::Inactive; CancelQueued(); }
+    bool Active() const { std::lock_guard lock(mutex_); return active_ && !closed_; }
+    void InitialReady() {
+        std::lock_guard lock(mutex_);
+        // Shared-source audio can already have reported health from its first
+        // read. Do not overwrite that report with the outer startup result.
+        if (active_ && !closed_ && status_.health.state == AudioEndpointState::Inactive) SetReady();
+    }
     void Ready() { std::lock_guard lock(mutex_); if (active_ && !closed_) SetReady(); }
     void Failed() {
         std::lock_guard lock(mutex_);
@@ -102,11 +108,11 @@ private:
 
 class SwitchablePcmCapture final : public PcmCaptureEndpoint {
     struct Producer {
+        enum class State { Opening, Started, Failed };
         std::mutex mutex;
-        std::condition_variable_any ready;
         struct Captured { PcmBlock block; std::chrono::steady_clock::time_point at; };
         std::deque<Captured> blocks;
-        bool started = false, failed = false;
+        State state = State::Opening;
         uint32_t delay = 0;
         uint64_t dropped = 0, expired = 0;
         // Last member: joins before any state the worker uses is destroyed.
@@ -114,11 +120,13 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
         explicit Producer(AudioSwitchControl::Factory factory, std::shared_ptr<DiagnosticHistory> diagnostics)
             : worker([this, factory = std::move(factory), diagnostics = std::move(diagnostics)](std::stop_token stop) {
             try {
+                if (stop.stop_requested()) return;
                 auto device = factory();
                 if (!device) throw std::runtime_error("Missing audio capture endpoint");
+                if (stop.stop_requested()) return;
                 device->Start(stop);
                 AudioThreadTask scheduling(AudioWorker::DeviceCapture, diagnostics);
-                { std::lock_guard lock(mutex); started = true; } ready.notify_all();
+                { std::lock_guard lock(mutex); state = State::Started; }
                 PcmBlock block;
                 uint64_t overflow = 0;
                 while (!stop.stop_requested() && device->Read(block, stop)) {
@@ -131,16 +139,10 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
                         blocks.push_back({block, std::chrono::steady_clock::now()});
                         delay = device->DelayMs(); dropped = device->DroppedFrames() + overflow;
                     }
-                    ready.notify_all();
                 }
             } catch (...) {}
-            { std::lock_guard lock(mutex); failed = true; } ready.notify_all();
+            std::lock_guard lock(mutex); state = State::Failed;
         }) {}
-        void Start(std::stop_token stop) {
-            std::unique_lock lock(mutex); ready.wait(lock, stop, [&] { return started || failed; });
-            if (stop.stop_requested()) worker.request_stop();
-            if (!started || failed || stop.stop_requested()) throw std::runtime_error("Audio capture startup failed");
-        }
         bool Pop(PcmBlock& block, uint32_t& latency, uint64_t& lost) {
             std::unique_lock lock(mutex);
             const auto now = std::chrono::steady_clock::now();
@@ -151,7 +153,7 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
             const auto age = std::chrono::duration_cast<std::chrono::milliseconds>(now - blocks.front().at).count();
             block = blocks.front().block; blocks.pop_front(); latency = delay + uint32_t(age); lost = dropped + expired; return true;
         }
-        bool Failed() { std::lock_guard lock(mutex); return failed; }
+        State Status() { std::lock_guard lock(mutex); return state; }
     };
     std::shared_ptr<AudioSwitchControl> control_;
     std::unique_ptr<Producer> current_, candidate_;
@@ -164,9 +166,9 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
     std::function<std::chrono::steady_clock::time_point()> now_;
     std::chrono::steady_clock::time_point retryAt_, pcmDeadline_;
     std::chrono::milliseconds retryDelay_{250};
-    bool recovering_ = false;
+    bool opening_ = false, recovering_ = false;
     void Fail() {
-        current_.reset(); recovering_ = false; delay_ = 0;
+        current_.reset(); opening_ = recovering_ = false; delay_ = 0;
         retiredDropped_ = dropped_; control_->Failed();
         retryAt_ = now_() + retryDelay_;
         retryDelay_ = std::min(retryDelay_ * 2, std::chrono::milliseconds(5000));
@@ -179,16 +181,22 @@ public:
     ~SwitchablePcmCapture() override { control_->Detach(); Finish(AudioUpdateError::Cancelled); }
     void Start() override { Start({}); }
     void Start(std::stop_token stop) override {
-        retryDelay_ = std::chrono::milliseconds(250); recovering_ = false;
+        if (stop.stop_requested()) throw std::runtime_error("Audio capture startup cancelled");
+        retryDelay_ = std::chrono::milliseconds(250); opening_ = recovering_ = false;
         try {
-            current_ = std::make_unique<Producer>(control_->Attach(), control_->Diagnostics()); current_->Start(stop);
-            pcmDeadline_ = now_() + std::chrono::seconds(5); control_->Ready();
+            auto factory = control_->Attach();
+            if (control_->Active()) {
+                // WebRTC waits for this Start call on its media worker. Begin
+                // the paced PCM timeline while device activation runs separately.
+                pcmDeadline_ = now_() + std::chrono::seconds(5);
+                current_ = std::make_unique<Producer>(std::move(factory), control_->Diagnostics());
+                opening_ = true;
+            }
         } catch (...) {
-            current_.reset();
             if (stop.stop_requested()) throw;
             Fail();
         }
-        // Prime a bounded 60ms reserve before starting the output timeline.
+        // Allow up to 60ms of startup prefill without waiting for activation.
         // The device may deliver several 10ms blocks together after a short stall.
         nextOutput_ = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
     }
@@ -220,17 +228,26 @@ public:
         }
         if (candidate_) {
             uint64_t lost = 0;
-            if (candidate_->Failed()) Finish(AudioUpdateError::Failed);
+            if (candidate_->Status() == Producer::State::Failed) Finish(AudioUpdateError::Failed);
             else if (candidate_->Pop(block, delay_, lost)) {
                 retiredDropped_ = dropped_; current_ = std::move(candidate_);
+                opening_ = false;
                 dropped_ = retiredDropped_ + lost;
                 retryDelay_ = std::chrono::milliseconds(250);
                 pcmDeadline_ = now_() + std::chrono::seconds(5);
                 Finish(AudioUpdateError::None); return true;
             } else if (std::chrono::steady_clock::now() >= deadline_) Finish(AudioUpdateError::Timeout);
         }
+        if (opening_ && !control_->Active()) { current_.reset(); opening_ = false; }
         if (recovering_ && !control_->RecoveryFactory()) { current_.reset(); recovering_ = false; delay_ = 0; }
-        if (current_ && current_->Failed()) Fail();
+        if (current_) {
+            const auto state = current_->Status();
+            if (state == Producer::State::Failed) Fail();
+            else if (opening_ && state == Producer::State::Started) {
+                opening_ = false;
+                control_->InitialReady();
+            }
+        }
         if (!current_ && !request_ && !stop.stop_requested() && now_() >= retryAt_) {
             if (auto factory = control_->RecoveryFactory()) {
                 try {
@@ -253,11 +270,11 @@ public:
         }
         else {
             block.fill(0); delay_ = 0;
-            // An endpoint may remain open while Read stops supplying blocks.
-            // Bound initial, restored and established recoverable devices.
+            // Bound initial activation as well as missing PCM from an open
+            // recoverable device. Teardown still requires driver cooperation.
             // Shared-source capture owns validated-target recovery itself;
             // manual selection, Close and nonrecoverable targets retain priority.
-            if (now_() >= pcmDeadline_ && control_->RecoveryFactory()) Fail();
+            if (now_() >= pcmDeadline_ && (opening_ || control_->RecoveryFactory())) Fail();
         }
         return !stop.stop_requested();
     }
