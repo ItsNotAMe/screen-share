@@ -54,6 +54,7 @@ inline QJsonObject PeerRecoveryJson(const screenshare::media::PeerRecoveryStatus
     using namespace screenshare::media;
     const char* state = "unknown"; const char* failure = "unknown";
     switch (value.state) {
+    case PeerLifecycleState::AwaitingOffer: state = "awaiting-offer"; break;
     case PeerLifecycleState::Connecting: state = "connecting"; break; case PeerLifecycleState::Connected: state = "connected"; break;
     case PeerLifecycleState::Backoff: state = "backoff"; break; case PeerLifecycleState::Restarting: state = "restarting"; break;
     case PeerLifecycleState::Failed: state = "failed"; break; case PeerLifecycleState::Closed: state = "closed"; break;

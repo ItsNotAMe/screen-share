@@ -135,7 +135,8 @@ public:
                 if (channel->label() == "telemetry") raw->telemetry->Attach(std::move(channel));
                 else if (raw->input) raw->input->Attach(std::move(channel));
                 else if (options_.channel) options_.channel(id, std::move(channel));
-            }, options_.connection, entry->events);
+            }, options_.connection, entry->events, identity_.host ? PeerConnectionLifecycle::StartMode::Connecting
+                : PeerConnectionLifecycle::StartMode::AwaitingOffer);
         auto send = [this, id](auto signal) { return send_(id, std::move(signal)); };
         entry->negotiation = std::make_unique<RoomPeerNegotiation>(entry->peer->connection,
             entry->peer->Negotiation(), next_, identity_.host, send, entry->events);
@@ -206,6 +207,10 @@ public:
             if (signal.connectionId != entry.negotiation->connectionId()) return true;
             return owner_->RequestRestart(entry.generation, entry.generation, PeerConnectionLifecycle::Clock::now());
         }
+        // A viewer can join before the host has a usable capture source.
+        // Start the connection deadline when the first offer arrives.
+        if (!identity_.host && signal.kind == RoomPeerSignal::Kind::Offer)
+            entry.peer->lifecycle.OfferReceived(entry.generation, PeerConnectionLifecycle::Clock::now());
         return entry.negotiation->Receive(std::move(signal));
     }
     std::vector<std::string> FailedPeers() const override { return {failed_.begin(), failed_.end()}; }

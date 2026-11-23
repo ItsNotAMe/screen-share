@@ -4,7 +4,7 @@
 #include <deque>
 
 namespace screenshare::media {
-enum class PeerLifecycleState { Connecting, Connected, Backoff, Restarting, Failed, Closed };
+enum class PeerLifecycleState { Connecting, Connected, Backoff, Restarting, Failed, Closed, AwaitingOffer };
 enum class PeerLifecycleFailure { None, DirectConnectTimeout, RestartLimit, RemoteClosed };
 enum class PeerLifecycleAction { None, RestartIce, Close };
 // One peer incarnation, called only on its control/signaling executor. Time is
@@ -14,10 +14,18 @@ class PeerConnectionLifecycle final {
 public:
     using Clock = std::chrono::steady_clock;
     using Time = Clock::time_point;
-    PeerConnectionLifecycle(uint64_t generation, Time now)
-        : generation_(generation), due_(now + std::chrono::seconds(20)) {}
+    enum class StartMode { Connecting, AwaitingOffer };
+    PeerConnectionLifecycle(uint64_t generation, Time now, StartMode mode = StartMode::Connecting)
+        : generation_(generation), due_(now + connectTimeout), state_(mode == StartMode::AwaitingOffer
+            ? PeerLifecycleState::AwaitingOffer : PeerLifecycleState::Connecting) {}
+    bool OfferReceived(uint64_t generation, Time now) {
+        if (!Accept(generation) || state_ != PeerLifecycleState::AwaitingOffer) return false;
+        state_ = PeerLifecycleState::Connecting;
+        due_ = now + connectTimeout;
+        return true;
+    }
     bool Connected(uint64_t generation, Time now) {
-        if (!Accept(generation)) return false;
+        if (!Accept(generation) || state_ == PeerLifecycleState::AwaitingOffer) return false;
         // Late success cannot revive an expired initial connection.
         if (state_ == PeerLifecycleState::Connecting && now >= due_) {
             Fail(PeerLifecycleFailure::DirectConnectTimeout); return false;
@@ -39,7 +47,8 @@ public:
     void Close() { state_ = PeerLifecycleState::Closed; }
     PeerLifecycleAction Tick(Time now) {
         if (state_ == PeerLifecycleState::Failed) return PeerLifecycleAction::Close;
-        if (state_ == PeerLifecycleState::Closed || state_ == PeerLifecycleState::Connected || now < due_)
+        if (state_ == PeerLifecycleState::Closed || state_ == PeerLifecycleState::Connected ||
+            state_ == PeerLifecycleState::AwaitingOffer || now < due_)
             return PeerLifecycleAction::None;
         if (state_ == PeerLifecycleState::Connecting) {
             Fail(PeerLifecycleFailure::DirectConnectTimeout); return PeerLifecycleAction::Close;
@@ -62,6 +71,7 @@ public:
     uint64_t generation() const { return generation_; }
     uint64_t restartRevision() const { return restartRevision_; }
 private:
+    inline static constexpr auto connectTimeout = std::chrono::seconds(20);
     bool Accept(uint64_t generation) const {
         return generation == generation_ && state_ != PeerLifecycleState::Closed && state_ != PeerLifecycleState::Failed;
     }
@@ -80,7 +90,7 @@ private:
     uint64_t generation_, restartRevision_ = 0;
     Time due_;
     std::deque<Time> attempts_;
-    PeerLifecycleState state_ = PeerLifecycleState::Connecting;
+    PeerLifecycleState state_;
     PeerLifecycleFailure failure_ = PeerLifecycleFailure::None;
 };
 }

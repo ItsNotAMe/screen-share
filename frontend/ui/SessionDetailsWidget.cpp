@@ -39,6 +39,7 @@ QString Phase(RoomPhase phase) {
 }
 QString Connection(PeerLifecycleState state) {
     switch(state) {
+    case PeerLifecycleState::AwaitingOffer:return "Waiting for host";
     case PeerLifecycleState::Connecting:return "Connecting";
     case PeerLifecycleState::Connected:return "Connected";
     case PeerLifecycleState::Backoff:case PeerLifecycleState::Restarting:return "Reconnecting";

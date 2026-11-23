@@ -3,14 +3,34 @@
 #include "media/ReceiverTelemetry.h"
 #include "media/ReceiverBufferInterval.h"
 #include "media/HostShareTelemetry.h"
+#include "media/PeerConnectionLifecycle.h"
 #include <QCoreApplication>
 #include <iostream>
 #include <limits>
+
+namespace {
+void VerifyFirstOfferDeadline() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    const PeerConnectionLifecycle::Time joined{};
+    const auto offer = joined + 5min;
+    PeerConnectionLifecycle viewer(1, joined, PeerConnectionLifecycle::StartMode::AwaitingOffer);
+    if (viewer.Tick(offer) != PeerLifecycleAction::None || viewer.Connected(1, offer) || viewer.OfferReceived(2, offer))
+        throw std::runtime_error("Waiting viewer expired or accepted a premature connection or stale offer");
+    if (!viewer.OfferReceived(1, offer) || viewer.OfferReceived(1, offer + 19s) ||
+        viewer.Tick(offer + 19999ms) != PeerLifecycleAction::None ||
+        viewer.Tick(offer + 20s) != PeerLifecycleAction::Close ||
+        viewer.failure() != PeerLifecycleFailure::DirectConnectTimeout || viewer.OfferReceived(1, offer + 21s))
+        throw std::runtime_error("First offer did not establish a single bounded connection deadline");
+}
+}
+
 // Links the complete shipped Windows runtime through the application core.
 // No capture/audio devices are opened before authenticated admission.
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
     try {
+        VerifyFirstOfferDeadline();
         using namespace screenshare::media;
         using namespace std::chrono_literals;
         auto require = [](bool value) { if (!value) throw std::runtime_error("Media telemetry protocol check failed"); };

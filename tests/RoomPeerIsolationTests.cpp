@@ -14,11 +14,12 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         SignalingExecutor executor;
-        std::unique_ptr<RoomRuntime> host, healthy, stalled;
+        std::unique_ptr<RoomRuntime> host, healthy, stalled, waiting;
         struct Signal { int destination; RoomPeerSignal value; };
         std::deque<Signal> pendingSignals;
         auto evidence = std::make_shared<Evidence>();
         auto hostEvidence = std::make_shared<Evidence>();
+        auto waitingEvidence = std::make_shared<Evidence>();
         auto run = [&](auto work) {
             std::exception_ptr failure;
             auto task = executor.Post([&] { try { work(); } catch (...) { failure = std::current_exception(); } });
@@ -26,13 +27,15 @@ int main(int argc, char** argv) {
             if (failure) std::rethrow_exception(failure);
         };
         auto tick = [&] {
-            host->Advance(); healthy->Advance(); if (stalled) stalled->Advance();
+            host->Advance(); healthy->Advance(); if (stalled) stalled->Advance(); if (waiting) waiting->Advance();
             while (!pendingSignals.empty()) {
                 auto signal = std::move(pendingSignals.front()); pendingSignals.pop_front();
                 if (signal.destination == 0) Check(host->Receive("healthy", std::move(signal.value)));
                 else if (signal.destination == 1) Check(healthy->Receive("host", std::move(signal.value)));
                 else if (signal.destination == 2) Check(host->Receive("stalled", std::move(signal.value)));
-                else Check(stalled->Receive("host", std::move(signal.value)));
+                else if (signal.destination == 3) Check(stalled->Receive("host", std::move(signal.value)));
+                else if (signal.destination == 4) Check(host->Receive("waiting", std::move(signal.value)));
+                else Check(waiting->Receive("host", std::move(signal.value)));
             }
         };
         auto wait = [&](auto predicate) {
@@ -40,20 +43,21 @@ int main(int argc, char** argv) {
         };
         auto stop = [&] {
             std::vector<std::shared_future<void>> stops;
-            run([&] { for (auto* peer : {host.get(), healthy.get(), stalled.get()}) if (peer) stops.push_back(peer->BeginStop()); });
+            run([&] { for (auto* peer : {host.get(), healthy.get(), stalled.get(), waiting.get()}) if (peer) stops.push_back(peer->BeginStop()); });
             Wait([&] {
-                run([&] { for (auto* peer : {host.get(), healthy.get(), stalled.get()}) if (peer) peer->Advance(); });
+                run([&] { for (auto* peer : {host.get(), healthy.get(), stalled.get(), waiting.get()}) if (peer) peer->Advance(); });
                 return std::all_of(stops.begin(), stops.end(), [](auto& future) { return future.wait_for(0ms) == std::future_status::ready; });
             });
             for (auto& future : stops) future.get();
-            run([&] { stalled.reset(); healthy.reset(); host.reset(); });
+            run([&] { waiting.reset(); stalled.reset(); healthy.reset(); host.reset(); });
         };
         try {
             run([&] {
                 host = std::make_unique<Runtime>(RoomIdentity{true, "test", "host"},
                     [&](const auto& peer, auto signal) {
                         if (peer == "stalled" && signal.kind == RoomPeerSignal::Kind::Candidate) return true;
-                        pendingSignals.push_back({peer == "healthy" ? 1 : 3, std::move(signal)}); return true;
+                        const int destination = peer == "waiting" ? 5 : (peer == "healthy" ? 1 : 3);
+                        pendingSignals.push_back({destination, std::move(signal)}); return true;
                     }, hostEvidence);
                 healthy = std::make_unique<Runtime>(RoomIdentity{false, "test", "healthy"},
                     [&](const auto&, auto signal) { pendingSignals.push_back({0, std::move(signal)}); return true; }, evidence);
@@ -72,6 +76,11 @@ int main(int argc, char** argv) {
             uint64_t revision = 0;
             run([&] {
                 revision = host->StreamSettings().requestedRevision;
+                // Start a viewer before the host can offer media, borrowing
+                // the existing 20s stalled ICE test as the waiting period.
+                waiting = std::make_unique<Runtime>(RoomIdentity{false, "test", "waiting"},
+                    [&](const auto&, auto signal) { pendingSignals.push_back({4, std::move(signal)}); return true; }, waitingEvidence);
+                Check(waiting->Add("host"));
                 NativeRoomRuntimeOptions options;
                 options.connection.type = webrtc::PeerConnectionInterface::kRelay;
                 options.engine = [] {
@@ -150,7 +159,13 @@ int main(int argc, char** argv) {
                     Check(failed->current.labels.at("connectionState") != "connected");
                 }
                 Check(host->StreamSettings().requestedRevision == revision);
+                if (!waiting->FailedPeers().empty())
+                    throw std::runtime_error("Viewer timed out while waiting for the first host offer");
+                Check(waitingEvidence->offers == 0 && waitingEvidence->frames == 0);
+                Check(host->Add("waiting"));
             });
+            wait([&] { return waitingEvidence->frames >= 5 && waitingEvidence->audio->audibleBlocks >= 10; });
+            run([&] { host->Remove("waiting"); waiting->Remove("host"); });
             const auto after = evidence->frames.load();
             wait([&] { return evidence->frames >= after + 30; });
             run([&] { host->Remove("healthy"); healthy->Remove("host"); });

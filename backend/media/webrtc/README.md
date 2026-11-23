@@ -289,3 +289,8 @@ without a replacement mailbox remain terminal. The runtime releases held input
 and blocks new grants while no source is available. If opening the initial
 source fails before the Windows capture device is ready, the room stays open
 and media starts when a replacement delivers its first frame.
+
+An admitted viewer can wait for that first media offer while the room remains
+connected. Receiving the first offer starts the viewer's 20-second connection
+deadline. Later offers cannot extend the initial deadline, and host connection
+and ICE restart deadlines retain their existing limits.

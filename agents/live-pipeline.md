@@ -7,6 +7,14 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-23 first media offer: an admitted viewer waits in AwaitingOffer while
+the host prepares capture. The first offer arms the viewer's 20-second media
+connection deadline once. Membership and signaling still govern departure and
+closure. Host connection and ICE restart bounds remain. The native regression
+fails on the old path after an offerless wait over 20 seconds and verifies that
+late video/audio arrives in the same peer while an offered but unreachable peer
+still times out. Clock tests verify expiry and prevent extension by later offers.
+
 2026-11-23 capture startup: after admission, a failed initial source construction
 or Start now enters SourceUnavailable with its failure reason. The room and
 selection mailbox survive. The capture owner releases partial native state and
