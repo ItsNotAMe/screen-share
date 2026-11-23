@@ -40,12 +40,14 @@ public:
             return SettingsApplyError::StaleRevision;
         auto parameters = sender.GetParameters();
         if (parameters.encodings.size() != 1) return SettingsApplyError::UnsupportedTopology;
+        auto applied = preferences;
+        applied.fps = std::min(applied.fps, kMaxEncodedFps);
         auto& encoding = parameters.encodings[0];
         const auto allowance = videoAllowance.value_or(limits.maxVideoBitrateBps);
         encoding.active = allowance != 0;
         encoding.max_bitrate_bps = std::max(1000, allowance);
         encoding.min_bitrate_bps.reset(); // Never turn a desired rate into a floor.
-        encoding.max_framerate = preferences.fps;
+        encoding.max_framerate = applied.fps;
         encoding.scale_resolution_down_by.reset();
         encoding.scale_resolution_down_to.reset();
         switch (limits.degradation) {
@@ -59,10 +61,10 @@ public:
             parameters.degradation_preference = webrtc::DegradationPreference::BALANCED; break;
         }
         if (!sender.SetParameters(parameters).ok()) return SettingsApplyError::SenderRejected;
-        source.Configure(preferences, revision);
+        source.Configure(applied, revision);
         revision_ = revision;
         appliedVideoBitrateBps_ = allowance;
-        preferences_ = preferences;
+        preferences_ = applied;
         return SettingsApplyError::None;
     }
     uint64_t revision() const noexcept { return revision_; }

@@ -104,6 +104,28 @@ int main(int argc, char** argv) {
             const auto restoredUntil = std::chrono::steady_clock::now() + 1000ms;
             wait([&] { return std::chrono::steady_clock::now() >= restoredUntil; });
             Check(hostEvidence->capture->captured.load() >= restoredAt + 27);
+            uint64_t highRateRevision = 0;
+            const auto beforeHighRate = evidence->smallFrames.load();
+            run([&] {
+                auto highRate = preferences;
+                highRate.fps = 120;
+                highRate.width = 320;
+                highRate.height = 180;
+                const auto change = host->UpdateStreamPreferences(highRate);
+                Check(change.error == StreamUpdateError::None);
+                highRateRevision = change.revision;
+            });
+            wait([&] { return host->StreamSettings().peers.front().observedRevision == highRateRevision; });
+            const auto highRateUntil = std::chrono::steady_clock::now() + 2000ms;
+            wait([&] { return std::chrono::steady_clock::now() >= highRateUntil; });
+            if (evidence->smallFrames < beforeHighRate + 30)
+                throw std::runtime_error("An active viewer did not receive resized video after a 120 FPS request");
+            run([&] {
+                Check(host->StreamSettings().preferences.fps == 120);
+                Check(host->StreamSettings().peers.front().appliedPreferences->fps == 60);
+                Check(hostEvidence->captureDemand->load() == 60);
+                Check(host->UpdateStreamPreferences(preferences).error == StreamUpdateError::None);
+            });
             uint64_t revision = 0;
             run([&] {
                 revision = host->StreamSettings().requestedRevision;

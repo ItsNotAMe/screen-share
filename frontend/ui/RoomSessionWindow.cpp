@@ -704,8 +704,14 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             }
             const auto sourceName=status.capture.selected.kind==CaptureKind::Window ? QString("Sharing a window") : QString("Display %1").arg(status.capture.selected.display+1);
             sourceTitle->setText("You’re sharing "+sourceName);
+            const auto& streamPreferences = status.stream.preferences;
+            auto frameRateLabel = QString("Auto");
+            if (streamPreferences.fpsMode == SettingMode::Manual) {
+                frameRateLabel = streamPreferences.fps > kMaxEncodedFps
+                    ? QString("%1 FPS limit").arg(kMaxEncodedFps) : QString("%1 FPS").arg(streamPreferences.fps);
+            }
             sourceSummary->setText(QString("%1  ·  %2").arg(status.stream.preferences.preset==StreamPreset::Gaming?"Gaming":"Quality",
-                status.stream.preferences.fpsMode==SettingMode::Auto?QString("Auto"):QString("%1 FPS").arg(status.stream.preferences.fps)));
+                frameRateLabel));
             QSize resolution=previewSourceSize_;bool streamResolution=false;
             if(!status.stream.peers.empty()&&status.stream.peers.front().width>0){resolution=QSize(status.stream.peers.front().width,status.stream.peers.front().height);streamResolution=true;}
             sourceSummary->setText((resolution.isValid()?QString("%1 × %2  ·  ").arg(resolution.width()).arg(resolution.height()):QString("Resolution pending  ·  "))+sourceSummary->text());
@@ -809,6 +815,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     // Use one frame-rate chooser; keep the existing model fields as the source
     // of truth for configuration and acknowledgements.
     auto* frameRate=new QComboBox;frameRate->setObjectName("sessionFrameRate");frameRate->addItem("Auto",0);
+    frameRate->setToolTip(QString("Shared video is limited to %1 FPS.").arg(kMaxEncodedFps));
     for(int fps:{30,60,120,144,240})frameRate->addItem(QString("%1 FPS").arg(fps),fps);
     if(frameRate->findData(p.fps)<0)frameRate->addItem(QString("%1 FPS").arg(p.fps),p.fps);
     frameRate->setCurrentIndex(p.fpsMode==SettingMode::Auto?0:frameRate->findData(p.fps));

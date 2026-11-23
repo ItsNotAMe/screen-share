@@ -1,5 +1,6 @@
 #include "media/webrtc/MfVideoEncoderFactory.h"
 #include "media/CodecDiagnostics.h"
+#include "media/StreamPreferences.h"
 #include "media/webrtc/MfHardwareSession.h"
 #include "codec/HardwareFrameWait.h"
 #include "media/webrtc/MappedVideoBuffer.h"
@@ -35,7 +36,7 @@ public:
     int InitEncode(const webrtc::VideoCodec* codec, const Settings& settings) override {
         if (!codec || codec->codecType != webrtc::kVideoCodecH264 ||
             codec->width < 16 || codec->height < 16 || codec->width > (level_ >= 52 ? 3840 : 1920) || codec->height > (level_ >= 52 ? 2160 : 1080) ||
-            codec->width % 2 || codec->height % 2 || codec->maxFramerate == 0 || codec->maxFramerate > 60 ||
+            codec->width % 2 || codec->height % 2 || codec->maxFramerate == 0 || codec->maxFramerate > kMaxEncodedFps ||
             codec->numberOfSimulcastStreams > 1 || codec->startBitrate > 40'000 || settings.number_of_cores < 1)
             return WEBRTC_VIDEO_CODEC_ERR_PARAMETER;
         CancelPending();
@@ -117,7 +118,7 @@ public:
                 // by RateControlParameters. Clamp before integer conversion.
                 const double targetFps = std::isfinite(rates.framerate_fps) && rates.framerate_fps > 0
                     ? rates.framerate_fps : double(maximumFps_);
-                const int requestedFps = static_cast<int>(std::round(std::clamp(targetFps, 1.0, 60.0)));
+                const int requestedFps = static_cast<int>(std::round(std::clamp(targetFps, 1.0, double(kMaxEncodedFps))));
                 // This is WebRTC's measured input cadence, not a new user FPS
                 // setting. Restarting MF on 54/55 FPS jitter discards rate-control
                 // history and emits unnecessary IDRs. Real cadence changes still
@@ -407,7 +408,7 @@ private:
     std::atomic<bool> hardwareActive_{false};
     int64_t hardwareSampleId_ = 0;
     const int level_;
-    int maximumFps_ = 60;
+    int maximumFps_ = kMaxEncodedFps;
     std::unique_ptr<H264StreamEncoder> encoder_;
     H264StreamEncoderConfig config_;
     webrtc::EncodedImageCallback* callback_ = nullptr;

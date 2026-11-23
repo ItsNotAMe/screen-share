@@ -10,12 +10,13 @@ enum class SettingsApplyError { None, Invalid, StaleRevision, UnsupportedTopolog
 enum class SettingMode { Auto, Manual };
 enum class ResolutionMode { Auto, Fixed, Native };
 enum class StreamDegradation { MaintainFps, MaintainResolution, Balanced, Disabled };
+inline constexpr int kMaxEncodedFps = 60;
 struct StreamPreferences {
     StreamPreset preset = StreamPreset::Gaming;
     ResolutionMode resolution = ResolutionMode::Auto;
     int width = 1920, height = 1080;
     SettingMode fpsMode = SettingMode::Manual;
-    int fps = 60;
+    int fps = kMaxEncodedFps;
     SettingMode bitrateMode = SettingMode::Auto;
     std::optional<int> bitrateLimitBps;
     std::optional<int> aggregateUploadLimitBps;

@@ -129,8 +129,9 @@ Hosts default to `shared`; supplying a device without a source selects `system`.
 Stream fields support `preset: gaming|quality`, `resolution: auto|fixed|native`,
 `fpsMode: auto|manual`, and `bitrateMode: auto|manual`. Manual bitrate requires
 `bitrateBps`; it limits the sender without forcing padding or a minimum bitrate.
-Fixed resolution selects the requested canvas; content is fitted into it. Actual
-delivered FPS/bitrate can fall below requested values under load/congestion.
+Fixed resolution selects the requested canvas and fits content into it. Live
+video uses a maximum of 60 FPS, including when a higher FPS is configured.
+Delivered FPS and bitrate can fall below their limits under load or congestion.
 
 For repeatable runs without keyboard/mouse input, add up to 64 ordered changes:
 
