@@ -291,7 +291,7 @@ void CaptureDemand(bool benchmark) {
     std::cout << "Capture demand: newest first frame, immediate wake (" << wakeMs
         << " ms), input identity, minimize/restore and close passed\n";
 }
-void StreamRateBenchmark() {
+void StreamRateBenchmark(bool compareRates) {
     using namespace std::chrono_literals;
     WindowsMediaRuntime runtime;
     Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
@@ -309,7 +309,7 @@ void StreamRateBenchmark() {
     auto track = webrtc::make_ref_counted<CaptureVideoSource>();
     StreamPreferences preferences;
     preferences.resolution = ResolutionMode::Native;
-    preferences.fps = 30;
+    preferences.fps = compareRates ? 30 : 60;
     track->Configure(preferences, 1);
     struct Sink final : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
         unsigned frames = 0;
@@ -345,9 +345,7 @@ void StreamRateBenchmark() {
             timer.Wait();
         }
     };
-    // Both arms keep the same 30 FPS viewer settings. The baseline captures at
-    // the old fixed 60 FPS source cap and discards the excess on the track.
-    for (int pair = 0; pair < 6; ++pair) for (int rate : {pair % 2 ? 30 : 60, pair % 2 ? 60 : 30}) {
+    const auto measure = [&](int pair, int rate) {
         *demand = rate;
         unsigned samples = 0, converted = 0;
         pump(500ms, samples, converted);
@@ -360,13 +358,18 @@ void StreamRateBenchmark() {
         const auto wall = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
         const auto cycles = captureCycles() - cyclesBefore;
         const auto used = CaptureCpuMs() - cpu;
-        Require(sink.frames >= 56 && sink.frames <= 62, "Capture rate did not sustain the 30 FPS track");
+        Require(sink.frames >= (compareRates ? 56u : 114u) && sink.frames <= unsigned(preferences.fps * 2 + 2),
+            "Capture did not sustain the requested track rate");
         std::sort(sink.gaps.begin(), sink.gaps.end());
         std::cout << std::fixed << std::setprecision(4) << "CAPTURE_FPS {\"pair\":" << pair
             << ",\"rate\":" << rate << ",\"cpuMs\":" << used << ",\"captureCycles\":" << cycles << ",\"wallMs\":" << wall
             << ",\"samples\":" << samples << ",\"converted\":" << converted << ",\"frames\":" << sink.frames
             << ",\"gapP95Ms\":" << sink.gaps[sink.gaps.size() * 95 / 100] << "}\n" << std::flush;
-    }
+    };
+    if (compareRates) {
+        // The 30 FPS track receives both 60 and 30 FPS capture in alternating order.
+        for (int pair = 0; pair < 6; ++pair) for (int rate : {pair % 2 ? 30 : 60, pair % 2 ? 60 : 30}) measure(pair, rate);
+    } else measure(0, 60);
     track->RemoveSink(&sink);
 }
 void SourceSwitches() {
@@ -499,7 +502,8 @@ int main(int argc, char** argv) try {
     if (argc > 1 && std::string_view(argv[1]) == "--cadence") StaticCadence();
     if (argc > 1 && std::string_view(argv[1]) == "--demand") CaptureDemand(true);
     if (argc > 1 && std::string_view(argv[1]) == "--demand-check") CaptureDemand(false);
-    if (argc > 1 && std::string_view(argv[1]) == "--stream-rate") StreamRateBenchmark();
+    if (argc > 1 && std::string_view(argv[1]) == "--stream-rate") StreamRateBenchmark(true);
+    if (argc > 1 && std::string_view(argv[1]) == "--capture-60") StreamRateBenchmark(false);
     if (argc > 1 && std::string_view(argv[1]) == "--switch") SourceSwitches();
     if (argc > 1 && std::string_view(argv[1]) == "--preview") PreviewReadback();
     if (argc > 1 && std::string_view(argv[1]) == "--large-source") OversizedSource();

@@ -210,6 +210,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11VertexShader> nv12VertexShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> nv12LumaPixelShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> nv12ChromaPixelShader_;
+    Microsoft::WRL::ComPtr<ID3D11Query> nv12Completion_;
     std::unique_ptr<WindowsGraphicsCaptureState> wgc_;
     DXGI_COLOR_SPACE_TYPE outputColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     bool outputHdrActive_ = false;

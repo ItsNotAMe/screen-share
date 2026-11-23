@@ -550,6 +550,7 @@ void DesktopCapturer::ResetGraphicsResources()
     nv12VertexShader_.Reset();
     nv12LumaPixelShader_.Reset();
     nv12ChromaPixelShader_.Reset();
+    nv12Completion_.Reset();
     context_.Reset();
     device_.Reset();
     std::memset(&sourceTextureDesc_, 0, sizeof(sourceTextureDesc_));
@@ -1599,9 +1600,13 @@ void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D1
         Microsoft::WRL::ComPtr<ID3D11Texture2D> snapshot;
         ThrowIfFailed(device_->CreateTexture2D(&description, nullptr, &snapshot), "Owned NV12 texture");
         context_->CopyResource(snapshot.Get(), textureSet.texture.Get());
-        D3D11_QUERY_DESC queryDescription{D3D11_QUERY_EVENT, 0};
-        Microsoft::WRL::ComPtr<ID3D11Query> completion;
-        ThrowIfFailed(device_->CreateQuery(&queryDescription, &completion), "Capture completion query");
+        // Cache only a completed query. Failure or timeout discards this one
+        // so the next frame can never observe a previous submission's result.
+        auto completion = std::move(nv12Completion_);
+        if (!completion) {
+            D3D11_QUERY_DESC queryDescription{D3D11_QUERY_EVENT, 0};
+            ThrowIfFailed(device_->CreateQuery(&queryDescription, &completion), "Capture completion query");
+        }
         context_->End(completion.Get());
         context_->Flush();
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
@@ -1618,12 +1623,13 @@ void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D1
             thread_local ShortWait completionWait;
             completionWait.Wait();
         }
+        nv12Completion_ = std::move(completion);
         frame.nv12Texture = std::move(snapshot);
         frame.nv12OwnedAndComplete = true;
     }
 
     if (!config_.includeNv12Readback) {
-        context_->Flush();
+        if (!frame.nv12OwnedAndComplete) context_->Flush();
         return;
     }
 

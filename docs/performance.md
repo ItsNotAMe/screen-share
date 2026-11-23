@@ -5,6 +5,29 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## GPU completion checks at 60 FPS (2026-11-23)
+
+Owned NV12 capture reuses the completed Direct3D event query on the same device.
+It flushes after queuing the copy, then confirms GPU completion before publishing
+the frame. A timeout or failure discards the query, and device replacement creates a
+fresh one. [Direct3D event queries](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_query) · [Direct3D command submission](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-flush)
+
+Six alternating before/after pairs against `b09c923` used the same
+`NativeCaptureTests --capture-60` probe, with a generated changing 1920×1080 WGC
+window, 500 ms settling, and two seconds per measurement. Both versions delivered
+120 frames in every measurement.
+
+| Median per measurement | Before | After |
+| --- | ---: | ---: |
+| Capture-thread CPU cycles | 99.66 million | 93.79 million |
+| New NV12 conversions | 114 | 113 |
+| 95th-percentile gap between sink frames | 17.70 ms | 17.82 ms |
+
+Capture-thread cycles fell **5.9%**, with paired reductions of 0.6–16.9%.
+Whole-process CPU timing varied across the short measurements. The probe includes
+capture, polling and source adaptation. Encoding, network transport and viewer
+rendering are outside its scope.
+
 ## Capture cadence follows the stream rate (2026-11-23)
 
 The host samples at the highest applied FPS limit among viewers receiving
