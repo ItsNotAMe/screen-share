@@ -95,7 +95,7 @@ public:
         // the captured target and pauses window input while it is unfocused.
         input_->Configure(input::Mouse | input::Keyboard | input::Gamepad, 0);
         if (identity_.host) {
-            if (options_.captureDemand) options_.captureDemand->store(false, std::memory_order_relaxed);
+            if (options_.captureDemand) options_.captureDemand->store(0, std::memory_order_relaxed);
             if (options_.captureForSelection) {
                 captureSwitch_ = options_.captureSwitch ? options_.captureSwitch : std::make_shared<CaptureSwitchControl>(options_.initialCapture);
                 starting_ = capture_.Start([initial = options_.capture, control = captureSwitch_] {
@@ -109,7 +109,7 @@ public:
         }
     }
     ~NativeRoomRuntime() override {
-        if (identity_.host && options_.captureDemand) options_.captureDemand->store(false, std::memory_order_relaxed);
+        if (identity_.host && options_.captureDemand) options_.captureDemand->store(0, std::memory_order_relaxed);
         input_->Close();
         if (owner_) owner_->Stop(); // Final teardown fallback; normal Stop already drained.
         owner_.reset(); peers_.clear(); audio_ = nullptr; engine_.reset();
@@ -307,7 +307,11 @@ public:
             if (identity_.host) {
                 const auto capture = capture_.snapshot();
                 sample.numbers["captureState"] = int(capture.state);
-                if (options_.captureDemand) sample.numbers["captureVideoDemand"] = options_.captureDemand->load(std::memory_order_relaxed);
+                if (options_.captureDemand) {
+                    const int requestedFps = options_.captureDemand->load(std::memory_order_relaxed);
+                    sample.numbers["captureVideoDemand"] = requestedFps > 0;
+                    sample.numbers["captureRequestedFps"] = requestedFps;
+                }
                 sample.numbers["captureFailure"] = int(capture.captureFailure);
                 sample.numbers["captureGeneration"] = double(capture.sourceGeneration);
             }
@@ -397,7 +401,7 @@ public:
             allocatedViewers_ = viewers;
             if (identity_.host && options_.preferences.aggregateUploadLimitBps) ++settingsRevision_;
         }
-        bool videoDemand = false;
+        int captureFps = 0;
         for (auto it = peers_.begin(); it != peers_.end();) {
             auto& entry = *it->second;
             if (entry.retired) { it = peers_.erase(it); continue; }
@@ -441,11 +445,12 @@ public:
                 }
             }
             // Stop new capture delivery on pause even if RTP rejected the update.
-            entry.deliverFrames->store(identity_.host && !options_.preferences.videoPaused && !entry.removing && !failed_.contains(it->first) &&
+            const bool deliverFrames = identity_.host && !options_.preferences.videoPaused && !entry.removing && !failed_.contains(it->first) &&
                 entry.negotiation->ready() && status && !status->peerClosed &&
                 status->state == PeerLifecycleState::Connected && entry.settings.revision() != 0 &&
-                entry.settings.appliedVideoBitrateBps() > 0, std::memory_order_relaxed);
-            videoDemand |= entry.deliverFrames->load(std::memory_order_relaxed);
+                entry.settings.appliedVideoBitrateBps() > 0;
+            entry.deliverFrames->store(deliverFrames, std::memory_order_relaxed);
+            if (deliverFrames) captureFps = std::max(captureFps, entry.settings.preferences()->fps);
             if (!entry.removing && !entry.negotiation->closed()) {
                 bool request = false;
                 { std::lock_guard lock(entry.sendRate->mutex);
@@ -488,10 +493,10 @@ public:
             }
             ++it;
         }
-        if (identity_.host && options_.captureDemand) options_.captureDemand->store(videoDemand, std::memory_order_relaxed);
+        if (identity_.host && options_.captureDemand) options_.captureDemand->store(captureFps, std::memory_order_relaxed);
     }
     std::shared_future<void> BeginStop() override {
-        if (identity_.host && options_.captureDemand) options_.captureDemand->store(false, std::memory_order_relaxed);
+        if (identity_.host && options_.captureDemand) options_.captureDemand->store(0, std::memory_order_relaxed);
         for (auto& [id, entry] : peers_) entry->deliverFrames->store(false, std::memory_order_relaxed);
         input_->Close();
         if (options_.playback) options_.playback->Close();

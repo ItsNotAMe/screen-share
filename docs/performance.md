@@ -5,6 +5,37 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Capture cadence follows the stream rate (2026-11-23)
+
+The host samples at the highest applied FPS limit among viewers receiving
+video, bounded by the capture source's own cap. Changing FPS updates the
+running capture on its next poll. Five health samples per second remain available
+at low stream rates when the source supports them. Empty and paused rooms still
+use their idle sampling policy.
+
+`NativeCaptureTests --stream-rate` compares the previous 60 FPS capture rate
+with 30 FPS capture for the same 30 FPS track. It uses a generated 1920×1080 WGC
+window, six alternating pairs, 500 ms settling and two seconds per measurement.
+The table shows medians per measurement.
+
+| Measure | 60 FPS capture | 30 FPS capture |
+| --- | ---: | ---: |
+| Capture samples | 120 | 60 |
+| New frames converted to NV12 | 111.5 | 60 |
+| Frames delivered to the track's sink | 60 | 60 |
+| Capture-thread CPU cycles | 99.27 million | 79.51 million |
+| 95th-percentile gap between sink frames | 34.70 ms | 34.08 ms |
+
+Capture-thread cycles fell **19.9%**, with paired reductions of 12.9–23.3%.
+The count includes Windows capture work, source adaptation and polling on that
+thread. Whole-process CPU milliseconds varied between runs. The measurement
+excludes encoding, network transport and rendering at the viewer.
+[Windows thread cycle counter documentation](https://learn.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-querythreadcycletime).
+
+The loopback regression separately changes a live 30 FPS source to 15 FPS,
+checks matching capture and decoded rates, then restores full capture on the
+same connection. Supplied-clock tests cover the rate change and source cap.
+
 ## Idle capture demand (2026-11-07)
 
 The host now requests full capture cadence only when at least one connected,

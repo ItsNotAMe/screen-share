@@ -315,22 +315,34 @@ void DemandCadence() {
     for (const int fps : {1, 3, 30, 60, 240}) {
         CaptureCadence cadence(fps);
         auto now = CaptureCadence::Clock::time_point{} + 1h;
-        Check(cadence.Due(now, false), "Idle startup waited for a frame slot");
+        Check(cadence.Due(now, 0), "Idle startup waited for a frame slot");
         cadence.Sampled(now);
         const auto idlePeriod = std::chrono::nanoseconds(1'000'000'000 / std::min(fps, 5));
-        Check(!cadence.Due(now + idlePeriod - 1ns, false) && cadence.Due(now + idlePeriod, false),
+        Check(!cadence.Due(now + idlePeriod - 1ns, 0) && cadence.Due(now + idlePeriod, 0),
             "Idle capture cadence exceeded its source cap");
         cadence.Sampled(now + idlePeriod);
         now += idlePeriod + 1ms;
-        Check(cadence.Due(now, true), "Viewer demand waited for an idle slot");
+        Check(cadence.Due(now, fps), "Viewer demand waited for an idle slot");
         cadence.Sampled(now);
         const auto activePeriod = std::chrono::nanoseconds(1'000'000'000 / fps);
         Check(!cadence.Due(now + activePeriod - 1ns) && cadence.Due(now + activePeriod),
             "Active capture cadence changed");
         now += 1h; Check(cadence.Due(now), "Delayed capture did not resume"); cadence.Sampled(now);
         Check(!cadence.Due(now), "Delayed capture replayed missed slots");
-        cadence.Reset(); Check(cadence.Due(now, false), "Capture rebuild retained an old frame deadline");
+        cadence.Reset(); Check(cadence.Due(now, 0), "Capture rebuild retained an old frame deadline");
     }
+    CaptureCadence cadence(60);
+    const auto now = CaptureCadence::Clock::time_point{} + 1h;
+    Check(cadence.Due(now, 60), "Active capture could not start");
+    cadence.Sampled(now);
+    Check(!cadence.Due(now + 33'333'332ns, 30) && cadence.Due(now + 33'333'333ns, 30),
+        "Lower viewer rate retained the faster capture interval");
+    cadence.Sampled(now + 33'333'333ns);
+    Check(cadence.Due(now + 34ms, 120), "Raising the viewer rate did not restore capture immediately");
+    cadence.Sampled(now + 34ms);
+    Check(!cadence.Due(now + 50'666'665ns, 120) && cadence.Due(now + 50'666'666ns, 120),
+        "Viewer rate exceeded the source cap");
+    Check(cadence.Due(now + 50'666'666ns, 0), "Entering standby delayed the existing health sample");
 }
 void LatestQueuedFrame() {
     struct Frame {

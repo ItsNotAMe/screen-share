@@ -27,7 +27,7 @@ inline CaptureConfig ConfigureWindowsRoomCapture(CaptureConfig config) {
 class WindowsCaptureSource final : public ICaptureSource {
 public:
     explicit WindowsCaptureSource(CaptureConfig config, std::shared_ptr<input::DesktopTargetState> target = {}, std::shared_ptr<DiagnosticHistory> diagnostics = {},
-        std::shared_ptr<std::atomic<bool>> demand = {}) : config_(ConfigureWindowsRoomCapture(config)), target_(std::move(target)), sourceId_((uint64_t(GetCurrentProcessId())<<32)|++nextSource_), property_(input::WindowIdentityProperty(sourceId_)), diagnostics_(std::move(diagnostics)), demand_(std::move(demand)), cadence_(std::max(1, config.targetFps)) {}
+        std::shared_ptr<std::atomic<int>> demand = {}) : config_(ConfigureWindowsRoomCapture(config)), target_(std::move(target)), sourceId_((uint64_t(GetCurrentProcessId())<<32)|++nextSource_), property_(input::WindowIdentityProperty(sourceId_)), diagnostics_(std::move(diagnostics)), demand_(std::move(demand)), cadence_(std::max(1, config.targetFps)) {}
     ~WindowsCaptureSource() override {
         if(target_)target_->Invalidate(sourceId_);
         const auto window=reinterpret_cast<HWND>(config_.windowHandle);
@@ -48,7 +48,8 @@ public:
             // Bootstrap/restore promptly until valid pixels are owned. Idle
             // throttling must not delay the first capture-device/frame barrier.
             const bool bootstrap = !retained_ && !Minimized();
-            if (!cadence_.Due(now, bootstrap || !demand_ || demand_->load(std::memory_order_relaxed))) return std::nullopt;
+            const int requestedFps = demand_ ? demand_->load(std::memory_order_relaxed) : config_.targetFps;
+            if (!cadence_.Due(now, bootstrap && !requestedFps ? config_.targetFps : requestedFps)) return std::nullopt;
             // WGC/DXGI may stop producing frames when the desktop is unchanged.
             // Sample the last owned texture at the configured cadence instead
             // of waiting for damage (or WebRTC's slow idle refresh).
@@ -139,7 +140,7 @@ private:
     std::optional<input::DesktopTarget> inputTarget_;
     std::shared_ptr<DiagnosticHistory> diagnostics_;
     int inputAvailability_ = -1;
-    const std::shared_ptr<std::atomic<bool>> demand_;
+    const std::shared_ptr<std::atomic<int>> demand_;
     CaptureCadence cadence_;
 };
 }

@@ -60,7 +60,7 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<unsigned> offers{0};
     std::atomic<unsigned> smallFrames{0};
     std::shared_ptr<proof::CaptureLifetime> capture = std::make_shared<proof::CaptureLifetime>();
-    std::shared_ptr<std::atomic<bool>> captureDemand = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<int>> captureDemand = std::make_shared<std::atomic<int>>(0);
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
     std::optional<PcmEndpointFactories> audioEndpoints;
     std::shared_ptr<PcmAudioDiagnostics> audioDiagnostics = std::make_shared<PcmAudioDiagnostics>();

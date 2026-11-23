@@ -79,6 +79,31 @@ int main(int argc, char** argv) {
             if (!hostEvidence->captureDemand->load())
                 throw std::runtime_error("Connected video did not restore full capture demand");
             wait([&] { return evidence->frames >= 30; });
+            StreamPreferences preferences;
+            uint64_t reducedRevision = 0;
+            run([&] {
+                preferences = host->StreamSettings().preferences;
+                auto reduced = preferences;
+                reduced.fps = 15;
+                const auto update = host->UpdateStreamPreferences(reduced);
+                Check(update.error == StreamUpdateError::None);
+                reducedRevision = update.revision;
+            });
+            wait([&] { return host->StreamSettings().peers.front().observedRevision == reducedRevision; });
+            const auto capturesAt15 = hostEvidence->capture->captured.load();
+            const auto decodedAt15 = evidence->frames.load();
+            const auto reducedUntil = std::chrono::steady_clock::now() + 1500ms;
+            wait([&] { return std::chrono::steady_clock::now() >= reducedUntil; });
+            const auto captured = hostEvidence->capture->captured.load() - capturesAt15;
+            const auto decoded = evidence->frames.load() - decodedAt15;
+            if (captured < 20 || captured > 25)
+                throw std::runtime_error("Capture did not follow the live 15 FPS setting: " + std::to_string(captured));
+            Check(decoded >= 19 && decoded <= 25);
+            run([&] { Check(host->UpdateStreamPreferences(preferences).error == StreamUpdateError::None); });
+            const auto restoredAt = hostEvidence->capture->captured.load();
+            const auto restoredUntil = std::chrono::steady_clock::now() + 1000ms;
+            wait([&] { return std::chrono::steady_clock::now() >= restoredUntil; });
+            Check(hostEvidence->capture->captured.load() >= restoredAt + 27);
             uint64_t revision = 0;
             run([&] {
                 revision = host->StreamSettings().requestedRevision;
@@ -104,7 +129,6 @@ int main(int argc, char** argv) {
                     if (peer.peerId == "stalled") return peer.appliedRevision == revision;
                 return false;
             });
-            StreamPreferences preferences;
             run([&] {
                 preferences = host->StreamSettings().preferences;
                 preferences.videoPaused = true;
