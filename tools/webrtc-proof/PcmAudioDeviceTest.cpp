@@ -55,8 +55,7 @@ void Switches() {
         });
     auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
     PcmBlock block; std::stop_source stop;
-    std::this_thread::sleep_for(100ms); capture->Read(block, stop.get_token());
-    Require(capture->DroppedFrames() >= 480 && capture->DelayMs() <= 80, "Capture backlog was not bounded");
+    Require(capture->Read(block, stop.get_token()), "Initial capture stopped");
     auto pump = [&](std::future<AudioUpdateResult>& future) {
         const auto deadline = std::chrono::steady_clock::now() + 6s;
         unsigned nonzero = 0;
@@ -89,6 +88,7 @@ void Switches() {
     // Recording can restart after its last viewer leaves; successful selection persists.
     capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
     Require(control->Status().revision == 4 && control->Status().selected.kind == AudioKind::Microphone, "Selection lost on recording restart");
+    capture_audio_recovery_test::Pump(*capture, block, [&] { return control->Status().health.state == AudioEndpointState::Running; });
     Require(processors == 4, "Microphone processor was nested or reused on restart");
     for (auto selection : {AudioSelection{AudioKind::None}, AudioSelection{}, AudioSelection{AudioKind::Process, {}, 1}}) {
         auto bypass = control->Submit(selection, good); pump(bypass);
@@ -157,6 +157,59 @@ void InactiveAudioSelection() {
     Require(original->live == 0 && replacement->live == 0 && !replacement->wrongThread,
         "Idle audio selection leaked endpoint ownership");
 }
+void ActiveCaptureBurstReserve() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    struct Burst {
+        std::mutex mutex;
+        std::condition_variable_any changed;
+        int16_t requested = 0, queued = 0;
+        void QueueThrough(int16_t last) {
+            std::unique_lock lock(mutex);
+            requested = last;
+            changed.notify_all();
+            Require(changed.wait_for(lock, 1s, [&] { return queued == last; }), "Capture did not queue the burst");
+        }
+    } burst;
+    class BurstCapture final : public PcmCaptureEndpoint {
+        Burst& burst_;
+        int16_t produced_ = 0;
+    public:
+        explicit BurstCapture(Burst& burst) : burst_(burst) {}
+        void Start() override {}
+        bool Read(PcmBlock& block, std::stop_token stop) override {
+            std::unique_lock lock(burst_.mutex);
+            // The producer calls Read again only after queueing the previous block.
+            burst_.queued = produced_;
+            burst_.changed.notify_all();
+            if (!burst_.changed.wait(lock, stop, [&] { return produced_ < burst_.requested; })) return false;
+            block.fill(++produced_);
+            return true;
+        }
+        uint32_t DelayMs() const override { return 0; }
+    };
+    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, [&] { return std::make_unique<BurstCapture>(burst); });
+    SwitchablePcmCapture capture(control);
+    capture.Start();
+    AudioThreadTask scheduling(AudioWorker::Capture);
+    PcmBlock block;
+    Require(capture.Read(block, {}) && block[0] == 0, "Capture did not start its paced timeline");
+    burst.QueueThrough(1);
+    Require(capture.Read(block, {}) && block[0] == 1, "Burst proof did not start on active PCM");
+
+    burst.QueueThrough(9);
+    Require(capture.Read(block, {}) && block[0] == 2 && capture.DroppedFrames() == 0,
+        "Active capture dropped fresh PCM from an eight-block burst");
+
+    burst.QueueThrough(19);
+    Require(capture.Read(block, {}) && block[0] == 12 && capture.DroppedFrames() == 9 * 480 && capture.DelayMs() <= 80,
+        "Oversized burst did not retain only the newest eight blocks");
+    std::this_thread::sleep_for(100ms);
+    Require(capture.Read(block, {}) && block[0] == 0, "Capture replayed stale PCM after a stall");
+    burst.QueueThrough(20);
+    Require(capture.Read(block, {}) && block[0] == 20 && capture.DroppedFrames() == 16 * 480,
+        "Capture failed to resume fresh PCM or account for discarded blocks");
+}
 // A device that produces just after the old 10ms timeout used to cause one
 // silence block plus one immediate captured block per read interval.
 void BurstyCaptureCadence() {
@@ -180,6 +233,7 @@ void BurstyCaptureCadence() {
     };
     auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, [] { return std::make_unique<Bursty>(); });
     SwitchablePcmCapture capture(control);capture.Start();
+    AudioThreadTask scheduling(AudioWorker::Capture);
     int last=0, skipped=0, silent=0, gaps=0;
     for(int index=0;index<150;++index) {
         PcmBlock block;Require(capture.Read(block,{}),"Bursty capture stopped");
@@ -321,6 +375,8 @@ void AutomaticPlaybackRecovery() {
     {
         ControlledPcmPlayout output(control, [&] { return now; }); output.Start();
         PcmBlock block; block.fill(2000);
+        Require(evidence->created == 0, "Playback start waited on output activation");
+        output.Write(block, {});
         Require(evidence->created == 1 && evidence->live == 0, "Unavailable output retained resources");
         for (auto delay : {250ms,500ms,1000ms,2000ms,4000ms,5000ms,5000ms}) {
             const auto attempts = evidence->created.load();
@@ -351,18 +407,18 @@ void AutomaticPlaybackRecovery() {
     Require(evidence->live == 0 && !evidence->wrongThread, "Automatic recovery leaked/crossed endpoint ownership");
 
     evidence = std::make_shared<PlaybackEvidence>(); evidence->unavailable = true;
-    bool closeDuringRecovery = false;
+    bool closeDuringActivation = false;
     PlaybackControl::Factory closingFactory = [&] {
-        if (closeDuringRecovery) control->Close();
+        if (closeDuringActivation) control->Close();
         return std::make_unique<Output>(evidence);
     };
     control = std::make_shared<PlaybackControl>(PlaybackSelection{}, closingFactory);
     {
         ControlledPcmPlayout output(control, [&] { return now; }); output.Start();
-        closeDuringRecovery = true; evidence->unavailable = false; evidence->sample = -1; now += 250ms;
+        closeDuringActivation = true; evidence->unavailable = false; evidence->sample = -1;
         output.Write(PcmBlock{}, {});
         Require(evidence->live == 0 && evidence->sample == -1 && control->Status().health.state == AudioEndpointState::Inactive,
-            "Close during activation installed/wrote a recovered endpoint");
+            "Close during initial activation installed or wrote an endpoint");
     }
 
     auto route = std::make_shared<std::atomic<uint64_t>>(0);
@@ -376,6 +432,7 @@ void AutomaticPlaybackRecovery() {
     control = std::make_shared<PlaybackControl>(PlaybackSelection{}, routed);
     {
         ControlledPcmPlayout output(control, [&] { return now; }); output.Start(); PcmBlock block; block.fill(3000);
+        output.Write(block, {});
         output.Write(block, {});
         Require(evidence->created == 2 && evidence->live == 1 && evidence->sample == 0,
             "Default route change during startup was lost");
@@ -433,7 +490,8 @@ void Playback() {
     }
     Require(evidence->live == 0 && !evidence->wrongThread, "Output ownership leaked");
     {
-        ControlledPcmPlayout output(control); output.Start(); PcmBlock block; block.fill(2000); output.Write(block, {});
+        ControlledPcmPlayout output(control); output.Start(); PcmBlock block; block.fill(2000);
+        output.Write(block, {}); output.Write(block, {});
         Require(evidence->sample == 1000 && control->Status().selected.deviceId == L"next", "Playback settings lost on restart");
         auto pending = control->Submit({}, good); control->Close();
         Require(pending.get().error == AudioUpdateError::Cancelled && control->Submit({}, good).get().error == AudioUpdateError::Unavailable, "Output close ordering failed");
@@ -456,8 +514,9 @@ void AudioRecovery() {
     auto ownership = std::make_shared<Ownership>(); ownership->unavailable = true;
     AudioSwitchControl::Factory factory = [ownership] { return std::make_unique<OwnedCapture>(ownership, false); };
     auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, factory);
-    auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
+    auto capture = std::make_unique<SwitchablePcmCapture>(control, [] { return std::chrono::steady_clock::time_point{}; }); capture->Start();
     PcmBlock block;
+    capture_audio_recovery_test::Pump(*capture, block, [&] { return control->Status().health.state == AudioEndpointState::Failed; });
     Require(control->Status().health.state == AudioEndpointState::Failed && control->Status().health.failures == 1 && ownership->live == 0,
         "Initial capture failure was hidden or retained its endpoint");
     for (int i = 0; i < 10; ++i) {
@@ -493,6 +552,7 @@ void AudioRecovery() {
         // Keep this manual-retry proof independent of wall-clock load; automatic
         // backoff and recovery are exercised with an advanced clock separately.
         ControlledPcmPlayout output(playback, [] { return std::chrono::steady_clock::time_point{}; }); output.Start(); block.fill(2000);
+        output.Write(block, {});
         Require(playback->Status().health.state == AudioEndpointState::Failed && evidence->live == 0, "Initial output failure killed recovery or retained device");
         for (int i = 0; i < 10; ++i) output.Write(block, {});
         Require(evidence->created == 1 && evidence->sample == 0 && output.BufferFrames() == 0, "Discard path retried, played or buffered failed output");
@@ -729,6 +789,7 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
         if (argc == 2 && std::string(argv[1]) == "--scheduling") { SchedulingUnderLoad(); return 0; }
         Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
+        ActiveCaptureBurstReserve();
         capture_audio_recovery_test::Run();
         render_progress_test::Run(); routed_capture_test::Run(); InactiveAudioSelection(); OutputClockCadence(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); AutomaticPlaybackRecovery(); Run(argc == 2); return 0;
     }

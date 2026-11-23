@@ -149,6 +149,11 @@ void ReceiverPreviewWindow::PresentFrame(const DecodedFrameInfo& frame)
 }
 void ReceiverPreviewWindow::PresentFrame(const Nv12VideoFrame& frame)
 {
+    if (frame.receivedAt && std::chrono::steady_clock::now() - *frame.receivedAt >= kVideoFrameFreshnessTimeout) {
+        ++framesDropped_;
+        inputMapping_ = {};
+        return;
+    }
     const auto before=framesPresented_;
     if (frame.native) PresentView({frame.width, frame.height, nullptr, 0, frame.native->texture()});
     else PresentPixels(frame.width, frame.height, frame.pixels());

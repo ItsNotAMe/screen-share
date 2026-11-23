@@ -18,7 +18,7 @@ double CpuMs() {
     return double(ticks(kernel) + ticks(user)) / 10000.;
 }
 int main() try {
-    const auto demand = std::make_shared<std::atomic<bool>>(true);
+    const auto demand = std::make_shared<std::atomic<int>>(60);
     std::atomic<uint64_t> frames{0};
     CaptureSession capture(1, [demand] { return std::make_unique<SyntheticCaptureSource>(1920, 1080, 60, demand); },
         [&](CaptureSample sample) {
@@ -39,7 +39,7 @@ int main() try {
     std::cout << std::fixed << std::setprecision(4);
     for (unsigned pair = 0; pair < 6; ++pair) {
         for (bool active : {pair % 2 == 0, pair % 2 != 0}) {
-            demand->store(active, std::memory_order_relaxed); pump(500ms);
+            demand->store(active ? 60 : 0, std::memory_order_relaxed); pump(500ms);
             const auto before = frames.load(); const auto cpu = CpuMs(); const auto began = std::chrono::steady_clock::now();
             pump(2000ms);
             const auto elapsed = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count();

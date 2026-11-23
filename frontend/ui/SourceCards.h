@@ -3,6 +3,8 @@
 #include <QStyledItemDelegate>
 #include <QPainter>
 #include <QResizeEvent>
+#include <QScrollBar>
+#include <QWheelEvent>
 
 class SourceCardDelegate final : public QStyledItemDelegate {
 public:
@@ -29,11 +31,30 @@ public:
 };
 class SourceList final : public QListWidget {
 public:
-    using QListWidget::QListWidget;
+    explicit SourceList(QWidget* parent = nullptr) : QListWidget(parent) {
+        setVerticalScrollMode(QAbstractItemView::ScrollPerPixel);
+        // Qt normally derives this step from the card height. Use a text-sized
+        // step so the system wheel setting moves only part of a row at a time.
+        verticalScrollBar()->setSingleStep(20);
+    }
     void setEmptyMessage(const QString& message) {
         emptyMessage_=message;setAccessibleDescription(message);viewport()->update();
     }
 protected:
+    void wheelEvent(QWheelEvent* event) override {
+        const auto pixels = event->pixelDelta();
+        if (pixels.isNull() || (event->modifiers() & (Qt::ControlModifier | Qt::ShiftModifier))) {
+            QListWidget::wheelEvent(event);
+            return;
+        }
+
+        // Use the touchpad's actual movement. QListWidget routes wheel input
+        // by angleDelta, which can be rounded or absent for pixel events.
+        auto* bar = verticalScrollBar();
+        const int previous = bar->value();
+        if (qAbs(pixels.y()) >= qAbs(pixels.x())) bar->setValue(previous - pixels.y());
+        event->setAccepted(bar->value() != previous);
+    }
     void paintEvent(QPaintEvent* event) override {
         QListWidget::paintEvent(event);
         if(!emptyMessage_.isEmpty()) {

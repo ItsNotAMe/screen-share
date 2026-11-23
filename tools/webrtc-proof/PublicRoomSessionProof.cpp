@@ -27,6 +27,11 @@ int main(int argc, char** argv) {
 #ifndef SCREENSHARE_WINDOWS_ROOM_PROOF
         hostEvidence->sharedSourceAudio = true;
         hostEvidence->switchableCapture = true;
+        hostEvidence->captureFactory = []() -> std::unique_ptr<ICaptureSource> {
+            throw std::runtime_error("Injected failure opening the selected source");
+        };
+        // Windows waits for the first captured device before creating media.
+        hostEvidence->engineReady = [capture = hostEvidence->capture] { return capture->captured.load() != 0; };
 #endif
         auto factory = [](auto evidence) { return [evidence](auto identity, auto send) { return std::make_unique<Runtime>(identity, std::move(send), evidence); }; };
         RoomOptions hostOptions; hostOptions.origin = argv[1]; hostOptions.host = true; hostOptions.nickname = "FacadeHost"; hostOptions.name = "Facade media";
@@ -36,6 +41,15 @@ int main(int argc, char** argv) {
         const auto started = Get(start);
         if (started.error != RoomError::None) std::cerr << "Host admission error " << int(started.error) << '\n';
         Check(started.error == RoomError::None);
+#ifndef SCREENSHARE_WINDOWS_ROOM_PROOF
+        Wait([&] {
+            const auto status = host.Status();
+            Check(status.phase == RoomPhase::Active);
+            return status.stream.capture.state == HostMediaState::SourceUnavailable;
+        });
+        const auto initialRoom = host.Status();
+        Check(initialRoom.stream.capture.failure == CaptureFailure::Source && !hostEvidence->capture->captured);
+#endif
         std::array<std::unique_ptr<RoomSession>, 4> viewers;
         std::array<std::shared_ptr<Evidence>, 4> evidence;
         auto options = hostOptions; options.host = false; options.roomId = host.Status().roomId;
@@ -46,7 +60,21 @@ int main(int argc, char** argv) {
             if (joined.error != RoomError::None) std::cerr << "Join error " << int(joined.error) << "; host error " << int(host.Status().error) << '\n';
             Check(joined.error == RoomError::None);
         }
+#ifndef SCREENSHARE_WINDOWS_ROOM_PROOF
+        Wait([&] {
+            const auto status = host.Status();
+            Check(status.phase == RoomPhase::Active && status.stream.capture.state == HostMediaState::SourceUnavailable);
+            return status.pendingPeers == viewers.size() && !status.activePeers && !status.failedPeers;
+        });
+        auto initialReplacement = host.SwitchCaptureSource({CaptureKind::Display, 1, 0, 30});
+        Check(Get(initialReplacement).error == CaptureUpdateError::None);
+#endif
         Wait([&] { for (auto& value : evidence) if (value->frames < 45 || value->audio->audibleBlocks < 20) return false; return host.Status().activePeers == 4; });
+#ifndef SCREENSHARE_WINDOWS_ROOM_PROOF
+        const auto recoveredRoom = host.Status();
+        Check(recoveredRoom.roomId == initialRoom.roomId && recoveredRoom.peerId == initialRoom.peerId &&
+            recoveredRoom.capture.revision == initialRoom.capture.revision + 1 && recoveredRoom.stream.capture.failure == CaptureFailure::None);
+#endif
         // Actual encrypted data channels and public port while four media peers
         // run. The sink changes only a synthetic scene, never Windows input.
         const auto hostId = host.Status().peerId, controllerId = viewers[0]->Status().peerId;
@@ -293,6 +321,7 @@ int main(int argc, char** argv) {
                 return false;
             };
             QNetworkAccessManager network;
+            bool refuseRetries = true;
             for (const auto& reconnecting : {controllerId, controllerId, hostId}) {
                 const auto oldHost = generation(host, controllerId);
                 const auto oldViewer = generation(*viewers[0], hostId);
@@ -301,11 +330,14 @@ int main(int argc, char** argv) {
                 const auto healthyOffers = evidence[1]->offers.load();
                 QUrl url(QString::fromLocal8Bit(argv[1]));
                 url.setPath(QString::fromStdString("/test/reconnect/" + host.Status().roomId + "/" + reconnecting));
+                if (refuseRetries) url.setQuery("outage=1");
                 auto* reply = network.get(QNetworkRequest(url));
                 Wait([&] { QCoreApplication::processEvents(); return reply->isFinished(); });
                 Check(reply->error() == QNetworkReply::NoError && reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt() == 204);
                 reply->deleteLater();
                 Wait([&] {
+                    if (viewers[0]->Status().phase == RoomPhase::Failed || host.Status().phase == RoomPhase::Failed)
+                        throw std::runtime_error("Room failed during a recoverable signaling outage");
                     if (generation(host, controllerId) <= oldHost || generation(*viewers[0], hostId) <= oldViewer ||
                         evidence[0]->frames < before + 30 || evidence[1]->frames < healthyBefore + 30 ||
                         host.Status().activePeers != 4 || !ready(host, controllerId) || !ready(*viewers[0], hostId)) return false;
@@ -328,6 +360,7 @@ int main(int argc, char** argv) {
                 Wait([&] { return hostEvidence->input->applied > applied; });
                 host.Input()->Revoke();
                 Wait([&] { return !granted(viewers[0]->Input(), hostId); });
+                refuseRetries = false;
             }
         }
         live.resolution = ResolutionMode::Fixed; live.width = 320; live.height = 180;

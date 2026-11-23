@@ -54,7 +54,7 @@ struct RoomSession::Impl {
         bool connected = false, terminal = false, admittedSnapshot = false, leaving = false, leaveDone = false;
         std::chrono::steady_clock::time_point leaveDeadline;
         std::optional<std::chrono::steady_clock::time_point> recoveryDeadline;
-        std::deque<std::chrono::steady_clock::time_point> reconnects;
+        std::deque<std::chrono::steady_clock::time_point> outageStarts;
         RoomError terminalError = RoomError::Transport;
         State(Impl& o, RoomRuntimeFactory f) : owner(o), factory(std::move(f)) {}
         void Phase(RoomPhase value, RoomError error = RoomError::None) {
@@ -183,16 +183,17 @@ struct RoomSession::Impl {
             if (event.kind == RoomSocket::EventKind::Reconnecting || event.kind == RoomSocket::EventKind::Error || event.kind == RoomSocket::EventKind::Closed)
                 FinishMutation({RoomUpdateError::Unconfirmed});
             if (event.kind == RoomSocket::EventKind::Snapshot) { admittedSnapshot = true; connected = true; recoveryDeadline.reset(); Phase(RoomPhase::Active); if (startReply) Schedule(); }
-            if (event.kind == RoomSocket::EventKind::Reconnecting) {
-                const auto now = std::chrono::steady_clock::now();
-                while (!reconnects.empty() && now - reconnects.front() >= 1min) reconnects.pop_front();
-                reconnects.push_back(now);
-                if (reconnects.size() > 3) terminal = true;
-                Phase(RoomPhase::Reconnecting); Schedule();
-            }
             if (event.kind == RoomSocket::EventKind::Error) {
                 if (event.error == RoomSocket::Error::Transport || event.error == RoomSocket::Error::Timeout) {
-                    if (!recoveryDeadline) recoveryDeadline = std::chrono::steady_clock::now() + 35s;
+                    // The next authoritative snapshot ends the outage. Until
+                    // then, failed retries share its deadline and limit slot.
+                    if (!recoveryDeadline) {
+                        const auto now = std::chrono::steady_clock::now();
+                        recoveryDeadline = now + 35s;
+                        while (!outageStarts.empty() && now - outageStarts.front() >= 1min) outageStarts.pop_front();
+                        outageStarts.push_back(now);
+                        if (outageStarts.size() > 3) terminal = true;
+                    }
                     Phase(RoomPhase::Reconnecting);
                     Schedule();
                 }

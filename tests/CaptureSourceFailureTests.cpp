@@ -257,6 +257,39 @@ void PendingReplacement() {
         "Pending replacement did not clear source failure");
     capture.Stop(); Check(!next->live && !old->wrongThread && !next->wrongThread, "Pending replacement cleanup escaped its owner");
 }
+void FailedInitialSelection() {
+    for (const bool failDuringStart : {false, true}) {
+        auto failed = std::make_shared<State>();
+        failed->failStart = true;
+        auto control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
+        std::atomic<unsigned> opens{0};
+        CaptureSession capture(8, [&, control] {
+            return std::make_unique<SwitchableCaptureSource>([&]() -> std::unique_ptr<ICaptureSource> {
+                ++opens;
+                if (!failDuringStart) throw std::runtime_error("Injected initial source construction failure");
+                return std::make_unique<Source>(failed);
+            }, control);
+        }, [](auto) {});
+        capture.EnableDelivery();
+        Unavailable(capture, CaptureFailure::Source);
+        Check(opens == 1 && !failed->live && failed->retired == unsigned(failDuringStart) &&
+            capture.status().delivered == 0 && control->Status().revision == 1,
+            "Initial failure retained native state or changed the selected source");
+
+        auto rejected = control->Submit({}, Factory(failed));
+        Check(rejected.wait_for(1s) == std::future_status::ready && rejected.get().error == CaptureUpdateError::Failed,
+            "A bad replacement did not resolve after failed startup");
+        Check(control->Status().revision == 1 && capture.status().state == CaptureState::Unavailable,
+            "Bad replacement changed the unavailable state or selection");
+
+        auto healthy = std::make_shared<State>();
+        Replace(capture, control, healthy);
+        Check(opens == 1 && control->Status().revision == 2, "The initial source retried or the replacement did not commit");
+        capture.Stop();
+        Check(!failed->live && !healthy->live && !failed->wrongThread && !healthy->wrongThread,
+            "Initial failure or replacement cleanup escaped the capture owner");
+    }
+}
 void FailureBoundaries() {
     auto state = std::make_shared<State>();
     CaptureSession ordinary(3, Factory(state), [](auto) {});
@@ -268,9 +301,10 @@ void FailureBoundaries() {
         [](auto) { throw std::runtime_error("Injected consumer failure"); });
     consumer.EnableDelivery(); Wait([&] { return consumer.status().state == CaptureState::Failed; }); consumer.Stop();
     Check(consumer.status().failure == CaptureFailure::Consumer, "Consumer failure was hidden as source unavailability");
-    state->failStart = true; control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
-    CaptureSession startup(5, [=] { return std::make_unique<SwitchableCaptureSource>(Factory(state), control); }, [](auto) {});
+    state->failStart = true;
+    CaptureSession startup(5, Factory(state), [](auto) {});
     Wait([&] { return startup.status().state == CaptureState::Failed; }); startup.Stop();
+    Check(startup.status().failure == CaptureFailure::Source, "Ordinary startup failure was hidden");
     state->failStart = false; state->silent = true; control = std::make_shared<CaptureSwitchControl>(CaptureSelection{});
     CaptureSession timeout(6, [=] { return std::make_unique<SwitchableCaptureSource>(Factory(state), control); }, [](auto) {}, 40ms);
     timeout.EnableDelivery(); Unavailable(timeout, CaptureFailure::StartupTimeout);
@@ -281,22 +315,34 @@ void DemandCadence() {
     for (const int fps : {1, 3, 30, 60, 240}) {
         CaptureCadence cadence(fps);
         auto now = CaptureCadence::Clock::time_point{} + 1h;
-        Check(cadence.Due(now, false), "Idle startup waited for a frame slot");
+        Check(cadence.Due(now, 0), "Idle startup waited for a frame slot");
         cadence.Sampled(now);
         const auto idlePeriod = std::chrono::nanoseconds(1'000'000'000 / std::min(fps, 5));
-        Check(!cadence.Due(now + idlePeriod - 1ns, false) && cadence.Due(now + idlePeriod, false),
+        Check(!cadence.Due(now + idlePeriod - 1ns, 0) && cadence.Due(now + idlePeriod, 0),
             "Idle capture cadence exceeded its source cap");
         cadence.Sampled(now + idlePeriod);
         now += idlePeriod + 1ms;
-        Check(cadence.Due(now, true), "Viewer demand waited for an idle slot");
+        Check(cadence.Due(now, fps), "Viewer demand waited for an idle slot");
         cadence.Sampled(now);
         const auto activePeriod = std::chrono::nanoseconds(1'000'000'000 / fps);
         Check(!cadence.Due(now + activePeriod - 1ns) && cadence.Due(now + activePeriod),
             "Active capture cadence changed");
         now += 1h; Check(cadence.Due(now), "Delayed capture did not resume"); cadence.Sampled(now);
         Check(!cadence.Due(now), "Delayed capture replayed missed slots");
-        cadence.Reset(); Check(cadence.Due(now, false), "Capture rebuild retained an old frame deadline");
+        cadence.Reset(); Check(cadence.Due(now, 0), "Capture rebuild retained an old frame deadline");
     }
+    CaptureCadence cadence(60);
+    const auto now = CaptureCadence::Clock::time_point{} + 1h;
+    Check(cadence.Due(now, 60), "Active capture could not start");
+    cadence.Sampled(now);
+    Check(!cadence.Due(now + 33'333'332ns, 30) && cadence.Due(now + 33'333'333ns, 30),
+        "Lower viewer rate retained the faster capture interval");
+    cadence.Sampled(now + 33'333'333ns);
+    Check(cadence.Due(now + 34ms, 120), "Raising the viewer rate did not restore capture immediately");
+    cadence.Sampled(now + 34ms);
+    Check(!cadence.Due(now + 50'666'665ns, 120) && cadence.Due(now + 50'666'666ns, 120),
+        "Viewer rate exceeded the source cap");
+    Check(cadence.Due(now + 50'666'666ns, 0), "Entering standby delayed the existing health sample");
 }
 void LatestQueuedFrame() {
     struct Frame {
@@ -323,6 +369,7 @@ void LatestQueuedFrame() {
     Check(failed && frame.id == 4, "Queue error lost the frame owned by the caller"); frame.Close();
 }
 int main() try {
+    FailedInitialSelection();
     DemandCadence(); LatestQueuedFrame();
     MinimizedRestore(); RecoveryBudgetBoundaries(); HealthyRecoveries(); ReadFailure(); RecoveryFailure(false); RecoveryFailure(true); PendingReplacement(); FailureBoundaries();
     std::cout << "Capture: minimized restore/timeout, renewed/bounded recovery, read/rebuild failure, replacement, cancellation and failure boundaries passed.\n";

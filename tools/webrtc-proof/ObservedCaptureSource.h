@@ -14,7 +14,7 @@ class ObservedCaptureSource final : public screenshare::media::ICaptureSource {
     screenshare::media::SyntheticCaptureSource source_;
     std::shared_ptr<CaptureLifetime> lifetime_;
 public:
-    explicit ObservedCaptureSource(std::shared_ptr<CaptureLifetime> lifetime, std::shared_ptr<std::atomic<bool>> demand = {})
+    explicit ObservedCaptureSource(std::shared_ptr<CaptureLifetime> lifetime, std::shared_ptr<std::atomic<int>> demand = {})
         : source_(640, 360, 30, std::move(demand)), lifetime_(std::move(lifetime)) { ++lifetime_->sources; }
     ~ObservedCaptureSource() override { --lifetime_->sources; }
     void Start() override { source_.Start(); }

@@ -20,13 +20,29 @@ struct CaptureSession::Impl {
             ShortWait idle;
             source = factory();
             if (!source) throw std::runtime_error("Missing capture source");
-            source->Start();
-            { std::lock_guard lock(mutex); status.source = source->Info(); }
             CaptureRecovery recovery;
             bool awaitingFrame = true;
-            auto deadline = std::chrono::steady_clock::now() + startupTimeout;
             uint64_t sequence = 0;
             unsigned skippedFrames = 0;
+            const auto abandon = [&] {
+                // Keep the switch mailbox and subscriptions alive. A failed
+                // capture source only retries after an explicit replacement.
+                if (failure == CaptureFailure::Consumer || !source->AbandonFailedSource()) return false;
+                recovery.AwaitReplacement();
+                awaitingFrame = true;
+                skippedFrames = 0;
+                std::lock_guard lock(mutex);
+                status.state = CaptureState::Unavailable;
+                status.failure = failure;
+                status.generation = recovery.generation();
+                return true;
+            };
+            try {
+                source->Start();
+                std::lock_guard lock(mutex);
+                status.source = source->Info();
+            } catch (...) { if (!abandon()) throw; }
+            auto deadline = std::chrono::steady_clock::now() + startupTimeout;
             while (!stop.stop_requested()) {
                 try {
                     failure = CaptureFailure::Recovery;
@@ -105,19 +121,7 @@ struct CaptureSession::Impl {
                             throw std::runtime_error("Capture startup frame timed out");
                         }
                     }
-                } catch (...) {
-                    // The switchable container may discard failed native state
-                    // while keeping its mailbox, subscriptions and room alive.
-                    // A replacement is explicit; do not restart a broken source
-                    // indefinitely or turn a consumer fault into a source pause.
-                    if (failure == CaptureFailure::Consumer || !source->AbandonFailedSource()) throw;
-                    recovery.AwaitReplacement();
-                    awaitingFrame = true; skippedFrames = 0;
-                    std::lock_guard lock(mutex);
-                    status.state = CaptureState::Unavailable;
-                    status.failure = failure;
-                    status.generation = recovery.generation();
-                }
+                } catch (...) { if (!abandon()) throw; }
                 // Bounded idle/backoff; cancellation is checked on the next
                 // iteration. Do not let occlusion expand this to a frame-long
                 // sleep. Sources must not block indefinitely in Poll.

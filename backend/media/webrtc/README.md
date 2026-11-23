@@ -35,7 +35,11 @@ back into codec lifecycle operations.
 SetRates applies the assigned bitrate directly. Zero suspends even when its FPS
 field is also zero. FPS changes restart the transform and force a keyframe;
 bitrate-only updates do not restart it. Software input must yield exactly one
-encoded packet. A completed software encode exceeding 500 ms drops that late
+encoded packet. If source pixels are unreadable before submission, drop that
+frame and carry any requested keyframe forward. The transform keeps its valid
+references and hardware input failures at this stage do not quarantine it.
+`encoder-input-unavailable` records frame preparation failures separately.
+A completed software encode exceeding 500 ms drops that late
 output and forces the next fresh picture to be a keyframe, retaining the live
 transform and latest pending input. The dropped picture's reference chain must
 never be used by a receiver. Diagnostics record `encoder-late-frame-dropped`
@@ -224,7 +228,11 @@ as specified by [Microsoft](https://learn.microsoft.com/en-us/windows/win32/api/
 Unknown engine periods are reported as zero, not inferred from buffer capacity.
 Capture delay is an estimate, not a measured capture-to-speaker latency.
 
-In session integration, SwitchablePcmCapture automatically retries committed
+In session integration, SwitchablePcmCapture starts the PCM timeline while its
+producer opens the initial host audio endpoint. It sends paced silence until
+audio is available, so even a slow audio open does not delay video negotiation.
+The initial deadline includes time spent opening the device. SwitchablePcmCapture
+automatically retries committed
 System/Microphone factories after activation/read failure or five seconds without
 fresh PCM, with 250 ms–5 s capped
 backoff and paced silence on the existing 10 ms output timeline. Recovery opens
@@ -274,11 +282,19 @@ session to check five healthy-separated injected losses; it does not reset the
 physical driver.
 
 The shipping switchable capture container can abandon a failed native source
-after acquisition/rebuild failure, first-frame timeout or exhausted recovery.
+after opening or starting it fails, acquisition/rebuild failure, first-frame
+timeout or exhausted recovery.
 CaptureSession preserves the room/distribution and the capture-selection mailbox
 in SourceUnavailable, with its failure reason retained. The host chooses the next
 source explicitly. Retirement/destruction stay on the capture owner; abandonment
 advances source generation and gives the next selected source a fresh recovery
-budget. Fresh output clears the failure. Consumer errors, initial Start failures
-and ordinary sources without a replacement mailbox remain terminal. The runtime
-releases held input and blocks new grants while no source is available.
+budget. Fresh output clears the failure. Consumer errors and failures of sources
+without a replacement mailbox remain terminal. The runtime releases held input
+and blocks new grants while no source is available. If opening the initial
+source fails before the Windows capture device is ready, the room stays open
+and media starts when a replacement delivers its first frame.
+
+An admitted viewer can wait for that first media offer while the room remains
+connected. Receiving the first offer starts the viewer's 20-second connection
+deadline. Later offers cannot extend the initial deadline, and host connection
+and ICE restart deadlines retain their existing limits.

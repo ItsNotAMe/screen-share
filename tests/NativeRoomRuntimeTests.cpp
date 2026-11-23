@@ -3,14 +3,67 @@
 #include "media/ReceiverTelemetry.h"
 #include "media/ReceiverBufferInterval.h"
 #include "media/HostShareTelemetry.h"
+#include "media/PeerConnectionLifecycle.h"
+#include "media/capture/WindowsCaptureSource.h"
 #include <QCoreApplication>
 #include <iostream>
 #include <limits>
+
+namespace {
+void VerifyRoomCaptureOutputSize() {
+    using namespace screenshare;
+    using namespace screenshare::media;
+    const auto requireSize = [](const CaptureConfig& config, int sourceWidth, int sourceHeight,
+                                int expectedWidth, int expectedHeight) {
+        if (config.OutputSize(sourceWidth, sourceHeight) != std::pair{expectedWidth, expectedHeight})
+            throw std::runtime_error("Capture chose incorrect output dimensions for " +
+                std::to_string(sourceWidth) + "x" + std::to_string(sourceHeight));
+    };
+    const auto room = ConfigureWindowsRoomCapture({});
+    requireSize(room, 5120, 1440, 3840, 1080);
+    requireSize(room, 7680, 4320, 3840, 2160);
+    requireSize(room, 2160, 3840, 1214, 2160);
+    requireSize(room, 3840, 2160, 3840, 2160);
+    requireSize(room, 1537, 865, 1536, 864);
+
+    CaptureConfig resized;
+    resized.targetWidth = 1920;
+    resized.targetHeight = 1080;
+    requireSize(ConfigureWindowsRoomCapture(resized), 5120, 1440, 1920, 1080);
+    resized.targetWidth = 5120;
+    resized.targetHeight = 2880;
+    requireSize(ConfigureWindowsRoomCapture(resized), 1920, 1080, 3840, 2160);
+    requireSize(CaptureConfig{}, 5120, 1440, 5120, 1440);
+    resized.targetWidth = 640;
+    resized.targetHeight = 360;
+    resized.fitWithinTarget = true;
+    requireSize(resized, 1280, 720, 640, 360);
+    requireSize(resized, 300, 200, 300, 200);
+}
+
+void VerifyFirstOfferDeadline() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    const PeerConnectionLifecycle::Time joined{};
+    const auto offer = joined + 5min;
+    PeerConnectionLifecycle viewer(1, joined, PeerConnectionLifecycle::StartMode::AwaitingOffer);
+    if (viewer.Tick(offer) != PeerLifecycleAction::None || viewer.Connected(1, offer) || viewer.OfferReceived(2, offer))
+        throw std::runtime_error("Waiting viewer expired or accepted a premature connection or stale offer");
+    if (!viewer.OfferReceived(1, offer) || viewer.OfferReceived(1, offer + 19s) ||
+        viewer.Tick(offer + 19999ms) != PeerLifecycleAction::None ||
+        viewer.Tick(offer + 20s) != PeerLifecycleAction::Close ||
+        viewer.failure() != PeerLifecycleFailure::DirectConnectTimeout || viewer.OfferReceived(1, offer + 21s))
+        throw std::runtime_error("First offer did not establish a single bounded connection deadline");
+}
+}
+
 // Links the complete shipped Windows runtime through the application core.
 // No capture/audio devices are opened before authenticated admission.
 int main(int argc, char** argv) {
     QCoreApplication application(argc, argv);
     try {
+        VerifyRoomCaptureOutputSize();
+        VerifyFirstOfferDeadline();
         using namespace screenshare::media;
         using namespace std::chrono_literals;
         auto require = [](bool value) { if (!value) throw std::runtime_error("Media telemetry protocol check failed"); };

@@ -21,7 +21,7 @@ struct DeviceState {
     std::shared_ptr<MfHardwareSession> hardware;
     std::shared_ptr<DiagnosticHistory> diagnostics = std::make_shared<DiagnosticHistory>();
     std::weak_ptr<AudioSwitchControl> audioControl;
-    std::shared_ptr<std::atomic<bool>> captureDemand = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<int>> captureDemand = std::make_shared<std::atomic<int>>(0);
     std::shared_ptr<MfHardwareSession> Get() { std::lock_guard lock(mutex); return hardware; }
 };
 class DeviceCapture final : public ICaptureSource {

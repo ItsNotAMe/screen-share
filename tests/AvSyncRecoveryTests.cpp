@@ -8,6 +8,8 @@ namespace {
 struct OutputState {
     std::atomic<unsigned> stallMs{0}, stalls{0}, created{0}, live{0}, audibleBlocks{0};
     std::atomic<bool> wedge{false}, wrongThread{false};
+    std::atomic<bool> videoDuringActivation{false};
+    std::function<unsigned()> videoFrames;
 };
 class Output final : public PcmPlayoutEndpoint {
     std::shared_ptr<OutputState> state_;
@@ -16,7 +18,16 @@ class Output final : public PcmPlayoutEndpoint {
 public:
     explicit Output(std::shared_ptr<OutputState> state) : state_(std::move(state)) { ++state_->created; ++state_->live; }
     ~Output() override { if (owner_ != std::this_thread::get_id()) state_->wrongThread = true; --state_->live; }
-    void Start() override { pacer_.Start(); }
+    void Start() override {
+        if (state_->created == 1) {
+            const auto first = state_->videoFrames();
+            const auto deadline = std::chrono::steady_clock::now() + 3s;
+            while (state_->videoFrames() - first < 5 && std::chrono::steady_clock::now() < deadline)
+                std::this_thread::sleep_for(1ms);
+            state_->videoDuringActivation = state_->videoFrames() - first >= 5;
+        }
+        pacer_.Start();
+    }
     void Write(const PcmBlock& block, std::stop_token stop) override {
         if (state_->wedge.exchange(false)) {
             // The production render loop sees a permanently full buffer while
@@ -59,6 +70,7 @@ int main(int argc, char** argv) {
         std::unique_ptr<RoomRuntime> host, viewer;
         auto output = std::make_shared<OutputState>();
         auto video = std::make_shared<Video>();
+        output->videoFrames = [video] { return video->frames.load(); };
         auto hostEvidence = std::make_shared<Evidence>(), viewerEvidence = std::make_shared<Evidence>();
         viewerEvidence->audioDiagnostics->events = std::make_shared<DiagnosticHistory>();
         StreamPreferences preferences;
@@ -105,6 +117,10 @@ int main(int argc, char** argv) {
             });
             wait([&] { return host->Ready("viewer") && viewer->Ready("host"); });
             run([&] { Check(host->Add("viewer") && viewer->Add("host")); });
+            wait([&] { return output->audibleBlocks >= 10; });
+            if (!output->videoDuringActivation)
+                throw std::runtime_error("Initial viewer audio activation held up video");
+            std::cout << "Viewer received video during initial audio activation, then played audible PCM" << std::endl;
             wait([&] { return video->frames > 150 && video->ntp > 0 && viewerEvidence->audioDiagnostics->lastPlayoutNtpMs > 0; });
             const auto skew = [&] { return viewerEvidence->audioDiagnostics->lastPlayoutNtpMs.load() - video->ntp.load(); };
             auto averageSkew = [&] {

@@ -11,6 +11,7 @@ inline QJsonObject FrameQueueDiagnostics(const LatestRoomVideoFrame::Statistics&
     return {{"schema", 1}, {"scope", "decoded-frame-handoff"},
         {"received", qint64(value.received)}, {"replaced", qint64(value.replaced)},
         {"delivered", qint64(value.delivered)}, {"failed", qint64(value.failed)},
+        {"expired", qint64(value.expired)},
         {"discardedOnStop", qint64(value.discardedOnStop)},
         {"inFlight", qint64(value.inFlight)}, {"pending", qint64(value.pending)},
         {"pendingAgeMs", age(value.pendingAgeUs)}, {"lastWaitMs", age(value.lastWaitUs)},

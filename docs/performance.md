@@ -5,6 +5,126 @@ Internet-latency guarantees. Backend comparisons controlled hardware/software,
 viewer counts and run order. Retain the modular backend; outstanding qualification is listed
 in [known limitations](known-limitations.md).
 
+## Hardware encoding after a live source switch (2026-11-23)
+
+When a new capture source delivers frames on a different Direct3D device, a
+healthy hardware encoder binds to that device and starts with a keyframe. The
+encoder retains its existing software fallback for device or transform failure.
+
+Six alternating pairs switched between two generated 1920×1080 WGC windows
+while one hardware H.264 encoder was running at 60 FPS and 4 Mbps. Each run
+measured the first replacement frame and 60 fresh frames after eight warm-up
+frames. Elapsed encode time runs from submission to the encoded callback.
+
+| Median per run | Before | After |
+| --- | ---: | ---: |
+| GPU readbacks per 60 steady frames | 60 | 0 |
+| Median steady encode time | 3.576 ms | 2.543 ms |
+| 95th-percentile steady encode time | 4.102 ms | 2.677 ms |
+| First replacement frame | 4.020 ms | 62.494 ms |
+
+The first replacement frame includes the one-time hardware startup and probes.
+The measurements cover the encoder path including any input readback. Capture,
+transport and viewer presentation are outside the measured interval.
+
+## Shared Direct3D context during live capture (2026-11-23)
+
+Room capture releases the shared context lock after submitting the NV12 draw,
+snapshot copy and completion query. Encoders and scalers can use the context
+while capture polls the query. Each frame still waits for GPU completion before
+publication. [Direct3D multithread protection](https://learn.microsoft.com/en-us/windows/win32/api/d3d10/nf-d3d10-id3d10multithread-enter) ·
+[Query completion](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-getdata)
+
+Six alternating before/after pairs used a generated 2560×1440 WGC window,
+500 ms of settling and three seconds of capture polling at 60 Hz per run. A
+second thread sampled acquisition time for the same context lock at about 1 kHz.
+
+| Median per run | Before | After |
+| --- | ---: | ---: |
+| 99th-percentile lock wait | 1.086 ms | 0.012 ms |
+| Lock waits longer than 0.5 ms | 161 | 0 |
+| New frames captured | 164 | 166 |
+| 95th-percentile gap between captured frames | 33.19 ms | 33.16 ms |
+
+The probe measures contention for the context lock. Encoder processing time
+and viewer latency are outside its scope. The separate 1080p check delivered 120
+frames to the video track in two seconds, including retained frames.
+
+## Host preview handoff at 1080p (2026-11-23)
+
+The active Windows host preview transfers its viewport-sized BGRA readback to
+Qt. The displayed pixmap can retain those pixels through Qt's image cleanup
+callback. [Qt image buffer ownership](https://doc.qt.io/qt-6/qimage.html) ·
+[Qt pixmap conversion](https://doc.qt.io/qt-6/qpixmap.html#fromImage-1)
+
+Six alternating pairs used a generated 1920×1080 WGC window and 60 frames per
+phase at the host's 30 FPS preview cadence. The measurements cover the handoff
+from CPU pixels to a pixmap on the native Windows Qt platform.
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Median handoff time per frame | 0.945 ms | 0.198 ms |
+| Median CPU cycles per 60 frames | 263.42 million | 55.74 million |
+| Pixmaps reusing the original readback buffer across all pairs | 0 / 360 | 360 / 360 |
+
+GPU readback, Qt event dispatch, painting, encoding and transport are outside
+the measured interval. The preview regression checks padded scanlines, delayed
+UI delivery and exact pixels at 1x and 2x display scale.
+
+## GPU completion checks at 60 FPS (2026-11-23)
+
+Owned NV12 capture reuses the completed Direct3D event query on the same device.
+It flushes after queuing the copy, then confirms GPU completion before publishing
+the frame. A timeout or failure discards the query, and device replacement creates a
+fresh one. [Direct3D event queries](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/ne-d3d11-d3d11_query) · [Direct3D command submission](https://learn.microsoft.com/en-us/windows/win32/api/d3d11/nf-d3d11-id3d11devicecontext-flush)
+
+Six alternating before/after pairs against `b09c923` used the same
+`NativeCaptureTests --capture-60` probe, with a generated changing 1920×1080 WGC
+window, 500 ms settling, and two seconds per measurement. Both versions delivered
+120 frames in every measurement.
+
+| Median per measurement | Before | After |
+| --- | ---: | ---: |
+| Capture-thread CPU cycles | 99.66 million | 93.79 million |
+| New NV12 conversions | 114 | 113 |
+| 95th-percentile gap between sink frames | 17.70 ms | 17.82 ms |
+
+Capture-thread cycles fell **5.9%**, with paired reductions of 0.6–16.9%.
+Whole-process CPU timing varied across the short measurements. The probe includes
+capture, polling and source adaptation. Encoding, network transport and viewer
+rendering are outside its scope.
+
+## Capture cadence follows the stream rate (2026-11-23)
+
+The host samples at the highest applied FPS limit among viewers receiving
+video, bounded by the capture source's own cap. Changing FPS updates the
+running capture on its next poll. Five health samples per second remain available
+at low stream rates when the source supports them. Empty and paused rooms still
+use their idle sampling policy.
+
+`NativeCaptureTests --stream-rate` compares the previous 60 FPS capture rate
+with 30 FPS capture for the same 30 FPS track. It uses a generated 1920×1080 WGC
+window, six alternating pairs, 500 ms settling and two seconds per measurement.
+The table shows medians per measurement.
+
+| Measure | 60 FPS capture | 30 FPS capture |
+| --- | ---: | ---: |
+| Capture samples | 120 | 60 |
+| New frames converted to NV12 | 111.5 | 60 |
+| Frames delivered to the track's sink | 60 | 60 |
+| Capture-thread CPU cycles | 99.27 million | 79.51 million |
+| 95th-percentile gap between sink frames | 34.70 ms | 34.08 ms |
+
+Capture-thread cycles fell **19.9%**, with paired reductions of 12.9–23.3%.
+The count includes Windows capture work, source adaptation and polling on that
+thread. Whole-process CPU milliseconds varied between runs. The measurement
+excludes encoding, network transport and rendering at the viewer.
+[Windows thread cycle counter documentation](https://learn.microsoft.com/en-us/windows/win32/api/realtimeapiset/nf-realtimeapiset-querythreadcycletime).
+
+The loopback regression separately changes a live 30 FPS source to 15 FPS,
+checks matching capture and decoded rates, then restores full capture on the
+same connection. Supplied-clock tests cover the rate change and source cap.
+
 ## Idle capture demand (2026-11-07)
 
 The host now requests full capture cadence only when at least one connected,

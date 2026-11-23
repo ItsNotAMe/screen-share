@@ -10,12 +10,13 @@ enum class SettingsApplyError { None, Invalid, StaleRevision, UnsupportedTopolog
 enum class SettingMode { Auto, Manual };
 enum class ResolutionMode { Auto, Fixed, Native };
 enum class StreamDegradation { MaintainFps, MaintainResolution, Balanced, Disabled };
+inline constexpr int kMaxEncodedFps = 60;
 struct StreamPreferences {
     StreamPreset preset = StreamPreset::Gaming;
     ResolutionMode resolution = ResolutionMode::Auto;
     int width = 1920, height = 1080;
     SettingMode fpsMode = SettingMode::Manual;
-    int fps = 60;
+    int fps = kMaxEncodedFps;
     SettingMode bitrateMode = SettingMode::Auto;
     std::optional<int> bitrateLimitBps;
     std::optional<int> aggregateUploadLimitBps;
@@ -26,12 +27,14 @@ struct StreamLimits {
     StreamDegradation degradation;
 };
 inline constexpr int kViewerAudioAllowanceBps = 128000;
+inline constexpr int kMaxStreamWidth = 3840;
+inline constexpr int kMaxStreamHeight = 2160;
 inline StreamLimits ValidateStreamPreferences(const StreamPreferences& value) {
     if ((value.preset != StreamPreset::Gaming && value.preset != StreamPreset::Quality) ||
         (value.resolution != ResolutionMode::Auto && value.resolution != ResolutionMode::Fixed && value.resolution != ResolutionMode::Native) ||
         (value.fpsMode != SettingMode::Auto && value.fpsMode != SettingMode::Manual) ||
         (value.bitrateMode != SettingMode::Auto && value.bitrateMode != SettingMode::Manual) ||
-        value.width < 2 || value.height < 2 || value.width > 3840 || value.height > 2160 ||
+        value.width < 2 || value.height < 2 || value.width > kMaxStreamWidth || value.height > kMaxStreamHeight ||
         value.width % 2 || value.height % 2 || value.fps < 1 || value.fps > 240 ||
         (value.bitrateMode == SettingMode::Manual && !value.bitrateLimitBps) ||
         (value.bitrateLimitBps && (*value.bitrateLimitBps < 1000 || *value.bitrateLimitBps > 100000000)) ||

@@ -1,5 +1,6 @@
 #include "ui/RoomSessionWindow.h"
 #include "ui/SourcePickerDialog.h"
+#include "ui/SourcePreviewLabel.h"
 #include "ui/RoomGamepadControl.h"
 #include "ui/SessionDetailsWidget.h"
 #include "ui/PeerDiagnosticsWidget.h"
@@ -1844,6 +1845,52 @@ void SourcePickerSearchScenario() {
     }
     owner.close();
 }
+void SourcePickerWheelScenario() {
+    QWidget owner;
+    owner.setStyleSheet(uiStyleSheet());
+    owner.resize(1000,820);
+    owner.show();
+    CaptureSelection current;
+    current.kind=CaptureKind::Window;
+    current.window=42;
+    SourcePickerDialog picker(current,false,&owner);
+    picker.open();
+    auto* cards=picker.findChild<QListWidget*>("SourceCards");
+    auto* selected=cards->currentItem();
+    Check(selected);
+    for(int index=1;index<=30;++index) {
+        auto* item=new QListWidgetItem(*selected);
+        item->setText(QString("Window %1").arg(index));
+        cards->addItem(item);
+    }
+
+    auto* bar=cards->verticalScrollBar();
+    auto* viewport=cards->viewport();
+    const auto wheel=[viewport](QPoint pixels,QPoint angle) {
+        const auto point=viewport->rect().center();
+        QWheelEvent event(point,viewport->mapToGlobal(point),pixels,angle,
+            Qt::NoButton,Qt::NoModifier,Qt::NoScrollPhase,false);
+        QApplication::sendEvent(viewport,&event);
+    };
+    const int previousLines=QApplication::wheelScrollLines();
+    QApplication::setWheelScrollLines(3);
+    for(const QSize size:{QSize(1000,820),QSize(740,600)}) {
+        owner.resize(size);
+        QCoreApplication::processEvents();
+        Wait([&]{return bar->maximum()>viewport->height();});
+        bar->setValue(bar->minimum());
+        const int start=cards->visualItemRect(selected).top();
+        wheel({},QPoint(0,-120));
+        const int distance=start-cards->visualItemRect(selected).top();
+        Check(distance>0 && distance<cards->gridSize().height());
+        wheel(QPoint(0,-12),QPoint(0,-120));
+        Check(start-cards->visualItemRect(selected).top()==distance+12);
+        wheel(QPoint(0,7),{});
+        Check(start-cards->visualItemRect(selected).top()==distance+5);
+        Check(cards->currentItem()==selected);
+    }
+    QApplication::setWheelScrollLines(previousLines);
+}
 void CapturePreviewOwnership() {
     // The exact-size path used to queue a QImage backed by freed frame pixels.
     for (const QSize size : {QSize(320,180),QSize(640,360),QSize(800,450)}) {
@@ -1855,6 +1902,51 @@ void CapturePreviewOwnership() {
         Check(image.pixel(0,0)==expected);
         frame.pixels.clear();frame.pixels.shrink_to_fit();
         Check(image.copy().pixel(0,0)==expected);
+    }
+}
+void HostPreviewQuality() {
+    HostPreviewCaptureSize requested;
+    requested.Update({900,600},2);Check(requested.Size()==QSize(1800,1200));
+    requested.Update({600,400},1);Check(requested.Size()==QSize(600,400));
+    requested.Update({4000,2500},2);Check(requested.Size()==QSize(2560,1440));
+    // A one-device-pixel pattern must survive presentation at both normal and
+    // high DPI. Scaling through logical pixels first destroys the 2x pattern.
+    for(const int scale:{1,2}) {
+        QImage source(600*scale,300*scale,QImage::Format_RGB32);source.fill(QColor("#15251f"));
+        for(int y=0;y<16*scale;++y)for(int x=0;x<source.width();++x)
+            source.setPixelColor(x,y,x%2?Qt::white:Qt::black);
+        {
+            QPainter text(&source);text.scale(scale,scale);text.setPen(Qt::white);
+            QFont font("Segoe UI",14);text.setFont(font);
+            text.drawText(QRect(24,40,550,220),Qt::AlignLeft|Qt::TextWordWrap,
+                "Host preview\nReadable source text at the displayed resolution.\nFine detail should survive high-DPI presentation.");
+        }
+        SourcePreviewLabel label;
+        label.resize(600, 300);
+        {
+            screenshare::CapturedFrame frame;
+            frame.width = source.width(); frame.height = source.height();
+            frame.rowPitch = frame.width * 4 + 16;
+            frame.pixels.resize(size_t(frame.rowPitch) * frame.height);
+            for (int y = 0; y < frame.height; ++y) {
+                const auto* row = reinterpret_cast<const std::byte*>(source.constScanLine(y));
+                std::copy_n(row, frame.width * 4, frame.pixels.data() + size_t(frame.rowPitch) * y);
+            }
+            const auto* readback = reinterpret_cast<const uchar*>(frame.pixels.data());
+            auto image = TakeHostPreviewImage(std::move(frame));
+            Check(image.constBits() == readback && image.bytesPerLine() == frame.rowPitch);
+            Check(QMetaObject::invokeMethod(&label, [&label, image = std::move(image)]() mutable {
+                label.setPixmap(QPixmap::fromImage(std::move(image)));
+            }, Qt::QueuedConnection));
+        }
+        QCoreApplication::sendPostedEvents(&label, QEvent::MetaCall);
+        Check(label.pixmap().toImage().convertToFormat(QImage::Format_RGB32) == source);
+        QImage rendered(source.size(),QImage::Format_RGB32);rendered.setDevicePixelRatio(scale);rendered.fill(Qt::red);
+        label.render(&rendered);
+        for(int x=32;x<64;++x)Check(rendered.pixelColor(x,8)==source.pixelColor(x,8));
+        if(const auto output=qEnvironmentVariable("SCREENSHARE_UI_PREVIEWS");!output.isEmpty()) {
+            QDir().mkpath(output);Check(rendered.save(QDir(output).filePath(QString("host-preview-%1x.png").arg(scale))));
+        }
     }
 }
 QJsonArray SourceSwitchScenario(const std::string& origin) {
@@ -2704,6 +2796,14 @@ int main(int argc, char** argv) {
     QApplication::setAttribute(Qt::AA_DontUseNativeDialogs); // Deterministic file-picker interaction in UI proofs.
     QApplication application(argc, argv); application.setQuitOnLastWindowClosed(false);
     QApplication::setStyle("Fusion");
+    if(argc==2 && std::string(argv[1])=="--source-picker-wheel") {
+        try { SourcePickerWheelScenario();std::cout<<"{\"passed\":true,\"source_picker_wheel\":true}\n";return 0; }
+        catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+    }
+    if(argc==2 && std::string(argv[1])=="--preview-quality") {
+        try { HostPreviewQuality();std::cout<<"{\"passed\":true,\"preview_quality\":true}\n";return 0; }
+        catch(const std::exception& error) {std::cerr<<error.what()<<'\n';return 1;}
+    }
 #ifndef SCREENSHARE_WINDOWS_UI_PROOF
     // Qt's offscreen backend does not enumerate the Windows font directory.
     const auto fonts = QDir(qEnvironmentVariable("WINDIR", "C:/Windows")).filePath("Fonts");
@@ -2716,11 +2816,12 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         CapturePreviewOwnership();
+        HostPreviewQuality();
         WindowPlacementChecks();
         RoomEndNoticePolicyChecks();
         Check(argc == 2 || (argc == 3 && (std::string(argv[2]) == "admission-feedback" || std::string(argv[2]) == "viewer-removal" || std::string(argv[2]) == "mutation-ack-delay" || std::string(argv[2]) == "controllers" || std::string(argv[2]) == "controllers-physical" || std::string(argv[2]) == "desktop-input" || std::string(argv[2]) == "native-resolution" || std::string(argv[2]) == "source-switch")));
         if(argc==2 || (argc==3 && std::string(argv[2])=="admission-feedback")) {
-            DirectoryStateScenario();DirectoryAvailabilityScenario();ReportExportScenario();SourcePickerSearchScenario();AdmissionFeedbackScenario();
+            DirectoryStateScenario();DirectoryAvailabilityScenario();ReportExportScenario();SourcePickerSearchScenario();SourcePickerWheelScenario();AdmissionFeedbackScenario();
         }
         WindowKeyboardControlScenario();
         ControllerLagKeepsPermission();

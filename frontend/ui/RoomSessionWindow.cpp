@@ -647,6 +647,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
         hostPreview_->setPixmap(uiIcon("display").pixmap(80,80));primary->addWidget(hostPreview_,1);
         auto* previewActivity=new QTimer(this);previewActivity->setInterval(100);
         connect(previewActivity,&QTimer::timeout,this,[this,loopback] {
+            previewCaptureSize_.Update(hostPreview_->size(),hostPreview_->devicePixelRatioF());
             const bool active=!loopback&&!closing_&&hostPreview_->isVisible()&&window()->isActiveWindow()&&!window()->isMinimized()&&!session_.status().stream.preferences.videoPaused&&session_.status().stream.capture.state!=HostMediaState::SourceUnavailable;
             if(active!=previewActive_){previewActive_=active;RefreshHostPreview();}
         });previewActivity->start();
@@ -703,8 +704,14 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
             }
             const auto sourceName=status.capture.selected.kind==CaptureKind::Window ? QString("Sharing a window") : QString("Display %1").arg(status.capture.selected.display+1);
             sourceTitle->setText("You’re sharing "+sourceName);
+            const auto& streamPreferences = status.stream.preferences;
+            auto frameRateLabel = QString("Auto");
+            if (streamPreferences.fpsMode == SettingMode::Manual) {
+                frameRateLabel = streamPreferences.fps > kMaxEncodedFps
+                    ? QString("%1 FPS limit").arg(kMaxEncodedFps) : QString("%1 FPS").arg(streamPreferences.fps);
+            }
             sourceSummary->setText(QString("%1  ·  %2").arg(status.stream.preferences.preset==StreamPreset::Gaming?"Gaming":"Quality",
-                status.stream.preferences.fpsMode==SettingMode::Auto?QString("Auto"):QString("%1 FPS").arg(status.stream.preferences.fps)));
+                frameRateLabel));
             QSize resolution=previewSourceSize_;bool streamResolution=false;
             if(!status.stream.peers.empty()&&status.stream.peers.front().width>0){resolution=QSize(status.stream.peers.front().width,status.stream.peers.front().height);streamResolution=true;}
             sourceSummary->setText((resolution.isValid()?QString("%1 × %2  ·  ").arg(resolution.width()).arg(resolution.height()):QString("Resolution pending  ·  "))+sourceSummary->text());
@@ -808,6 +815,7 @@ RoomSessionWindow::RoomSessionWindow(RoomSessionConfig config, QtRoomSession::Fa
     // Use one frame-rate chooser; keep the existing model fields as the source
     // of truth for configuration and acknowledgements.
     auto* frameRate=new QComboBox;frameRate->setObjectName("sessionFrameRate");frameRate->addItem("Auto",0);
+    frameRate->setToolTip(QString("Shared video is limited to %1 FPS.").arg(kMaxEncodedFps));
     for(int fps:{30,60,120,144,240})frameRate->addItem(QString("%1 FPS").arg(fps),fps);
     if(frameRate->findData(p.fps)<0)frameRate->addItem(QString("%1 FPS").arg(p.fps),p.fps);
     frameRate->setCurrentIndex(p.fpsMode==SettingMode::Auto?0:frameRate->findData(p.fps));
@@ -1117,18 +1125,26 @@ void RoomSessionWindow::RefreshHostPreview() {
     auto pending=std::make_shared<std::atomic_bool>(false);
     previewWorker_=QThread::create([this,source,revision,pending] {
         try {
-            screenshare::CaptureConfig capture;ConfigureCapturePreview(capture,{640,360});capture.allowDisplayFallback=false;
+            screenshare::CaptureConfig capture;ConfigureCapturePreview(capture,previewCaptureSize_.Size());capture.targetFps=30;capture.allowDisplayFallback=false;
             capture.backend=screenshare::CaptureBackend::WindowsGraphicsCapture;
             capture.sourceType=source.kind==CaptureKind::Window?screenshare::CaptureSourceType::Window:screenshare::CaptureSourceType::Display;
             capture.windowHandle=source.window;capture.displayIndex=source.display;
             screenshare::DesktopCapturer capturer;capturer.Start(capture);
             while(!QThread::currentThread()->isInterruptionRequested()) {
-                const auto nextFrame=std::chrono::steady_clock::now()+CapturePreviewInterval;
+                const auto nextFrame=std::chrono::steady_clock::now()+HostCapturePreviewInterval;
+                const auto target=previewCaptureSize_.Size();
+                capturer.SetTargetSize(target.width(),target.height());
                 auto frame=capturer.TryCaptureFrame(std::chrono::milliseconds(30));
-                if(frame&&!frame->pixels.empty()&&!pending->exchange(true)) {
-                    auto image=CapturePreviewImage(*frame,{640,360});
-                    const QSize sourceSize(frame->sourceWidth,frame->sourceHeight);
-                    QMetaObject::invokeMethod(this,[this,image,sourceSize,revision,pending]{pending->store(false);if(revision==previewRevision_&&previewActive_){previewSourceSize_=sourceSize;hostPreview_->setPixmap(QPixmap::fromImage(image));}},Qt::QueuedConnection);
+                if (frame && !frame->pixels.empty() && !pending->exchange(true)) {
+                    const QSize sourceSize(frame->sourceWidth, frame->sourceHeight);
+                    auto image = TakeHostPreviewImage(std::move(*frame));
+                    QMetaObject::invokeMethod(this, [this, image = std::move(image), sourceSize, revision, pending]() mutable {
+                        pending->store(false);
+                        if (revision == previewRevision_ && previewActive_ && !image.isNull()) {
+                            previewSourceSize_ = sourceSize;
+                            hostPreview_->setPixmap(QPixmap::fromImage(std::move(image)));
+                        }
+                    }, Qt::QueuedConnection);
                 }
                 WaitForCapturePreview(nextFrame);
             }

@@ -14,11 +14,12 @@ int main(int argc, char** argv) {
     int result = 0;
     try {
         SignalingExecutor executor;
-        std::unique_ptr<RoomRuntime> host, healthy, stalled;
+        std::unique_ptr<RoomRuntime> host, healthy, stalled, waiting;
         struct Signal { int destination; RoomPeerSignal value; };
         std::deque<Signal> pendingSignals;
         auto evidence = std::make_shared<Evidence>();
         auto hostEvidence = std::make_shared<Evidence>();
+        auto waitingEvidence = std::make_shared<Evidence>();
         auto run = [&](auto work) {
             std::exception_ptr failure;
             auto task = executor.Post([&] { try { work(); } catch (...) { failure = std::current_exception(); } });
@@ -26,13 +27,15 @@ int main(int argc, char** argv) {
             if (failure) std::rethrow_exception(failure);
         };
         auto tick = [&] {
-            host->Advance(); healthy->Advance(); if (stalled) stalled->Advance();
+            host->Advance(); healthy->Advance(); if (stalled) stalled->Advance(); if (waiting) waiting->Advance();
             while (!pendingSignals.empty()) {
                 auto signal = std::move(pendingSignals.front()); pendingSignals.pop_front();
                 if (signal.destination == 0) Check(host->Receive("healthy", std::move(signal.value)));
                 else if (signal.destination == 1) Check(healthy->Receive("host", std::move(signal.value)));
                 else if (signal.destination == 2) Check(host->Receive("stalled", std::move(signal.value)));
-                else Check(stalled->Receive("host", std::move(signal.value)));
+                else if (signal.destination == 3) Check(stalled->Receive("host", std::move(signal.value)));
+                else if (signal.destination == 4) Check(host->Receive("waiting", std::move(signal.value)));
+                else Check(waiting->Receive("host", std::move(signal.value)));
             }
         };
         auto wait = [&](auto predicate) {
@@ -40,20 +43,21 @@ int main(int argc, char** argv) {
         };
         auto stop = [&] {
             std::vector<std::shared_future<void>> stops;
-            run([&] { for (auto* peer : {host.get(), healthy.get(), stalled.get()}) if (peer) stops.push_back(peer->BeginStop()); });
+            run([&] { for (auto* peer : {host.get(), healthy.get(), stalled.get(), waiting.get()}) if (peer) stops.push_back(peer->BeginStop()); });
             Wait([&] {
-                run([&] { for (auto* peer : {host.get(), healthy.get(), stalled.get()}) if (peer) peer->Advance(); });
+                run([&] { for (auto* peer : {host.get(), healthy.get(), stalled.get(), waiting.get()}) if (peer) peer->Advance(); });
                 return std::all_of(stops.begin(), stops.end(), [](auto& future) { return future.wait_for(0ms) == std::future_status::ready; });
             });
             for (auto& future : stops) future.get();
-            run([&] { stalled.reset(); healthy.reset(); host.reset(); });
+            run([&] { waiting.reset(); stalled.reset(); healthy.reset(); host.reset(); });
         };
         try {
             run([&] {
                 host = std::make_unique<Runtime>(RoomIdentity{true, "test", "host"},
                     [&](const auto& peer, auto signal) {
                         if (peer == "stalled" && signal.kind == RoomPeerSignal::Kind::Candidate) return true;
-                        pendingSignals.push_back({peer == "healthy" ? 1 : 3, std::move(signal)}); return true;
+                        const int destination = peer == "waiting" ? 5 : (peer == "healthy" ? 1 : 3);
+                        pendingSignals.push_back({destination, std::move(signal)}); return true;
                     }, hostEvidence);
                 healthy = std::make_unique<Runtime>(RoomIdentity{false, "test", "healthy"},
                     [&](const auto&, auto signal) { pendingSignals.push_back({0, std::move(signal)}); return true; }, evidence);
@@ -64,14 +68,72 @@ int main(int argc, char** argv) {
             wait([&] { return std::chrono::steady_clock::now() >= idleUntil; });
             const auto idleFrames = hostEvidence->capture->captured.load() - idleStart;
             Check(!hostEvidence->captureDemand->load() && idleFrames >= 3 && idleFrames <= 8);
+            hostEvidence->audio->holdCaptureActivation = true;
             run([&] { Check(host->Add("healthy")); Check(healthy->Add("host")); });
             wait([&] { return evidence->frames >= 5; });
+            if (!hostEvidence->audio->captureActivating)
+                throw std::runtime_error("Initial host audio activation held up the viewer's video");
+            Check(evidence->audio->audibleBlocks == 0);
+            hostEvidence->audio->holdCaptureActivation = false;
+            wait([&] { return evidence->audio->audibleBlocks >= 10; });
             if (!hostEvidence->captureDemand->load())
                 throw std::runtime_error("Connected video did not restore full capture demand");
             wait([&] { return evidence->frames >= 30; });
+            StreamPreferences preferences;
+            uint64_t reducedRevision = 0;
+            run([&] {
+                preferences = host->StreamSettings().preferences;
+                auto reduced = preferences;
+                reduced.fps = 15;
+                const auto update = host->UpdateStreamPreferences(reduced);
+                Check(update.error == StreamUpdateError::None);
+                reducedRevision = update.revision;
+            });
+            wait([&] { return host->StreamSettings().peers.front().observedRevision == reducedRevision; });
+            const auto capturesAt15 = hostEvidence->capture->captured.load();
+            const auto decodedAt15 = evidence->frames.load();
+            const auto reducedUntil = std::chrono::steady_clock::now() + 1500ms;
+            wait([&] { return std::chrono::steady_clock::now() >= reducedUntil; });
+            const auto captured = hostEvidence->capture->captured.load() - capturesAt15;
+            const auto decoded = evidence->frames.load() - decodedAt15;
+            if (captured < 20 || captured > 25)
+                throw std::runtime_error("Capture did not follow the live 15 FPS setting: " + std::to_string(captured));
+            Check(decoded >= 19 && decoded <= 25);
+            run([&] { Check(host->UpdateStreamPreferences(preferences).error == StreamUpdateError::None); });
+            const auto restoredAt = hostEvidence->capture->captured.load();
+            const auto restoredUntil = std::chrono::steady_clock::now() + 1000ms;
+            wait([&] { return std::chrono::steady_clock::now() >= restoredUntil; });
+            Check(hostEvidence->capture->captured.load() >= restoredAt + 27);
+            uint64_t highRateRevision = 0;
+            const auto beforeHighRate = evidence->smallFrames.load();
+            run([&] {
+                auto highRate = preferences;
+                highRate.fps = 120;
+                highRate.width = 320;
+                highRate.height = 180;
+                const auto change = host->UpdateStreamPreferences(highRate);
+                Check(change.error == StreamUpdateError::None);
+                highRateRevision = change.revision;
+            });
+            wait([&] { return host->StreamSettings().peers.front().observedRevision == highRateRevision; });
+            const auto highRateUntil = std::chrono::steady_clock::now() + 2000ms;
+            wait([&] { return std::chrono::steady_clock::now() >= highRateUntil; });
+            if (evidence->smallFrames < beforeHighRate + 30)
+                throw std::runtime_error("An active viewer did not receive resized video after a 120 FPS request");
+            run([&] {
+                Check(host->StreamSettings().preferences.fps == 120);
+                Check(host->StreamSettings().peers.front().appliedPreferences->fps == 60);
+                Check(hostEvidence->captureDemand->load() == 60);
+                Check(host->UpdateStreamPreferences(preferences).error == StreamUpdateError::None);
+            });
             uint64_t revision = 0;
             run([&] {
                 revision = host->StreamSettings().requestedRevision;
+                // Start a viewer before the host can offer media, borrowing
+                // the existing 20s stalled ICE test as the waiting period.
+                waiting = std::make_unique<Runtime>(RoomIdentity{false, "test", "waiting"},
+                    [&](const auto&, auto signal) { pendingSignals.push_back({4, std::move(signal)}); return true; }, waitingEvidence);
+                Check(waiting->Add("host"));
                 NativeRoomRuntimeOptions options;
                 options.connection.type = webrtc::PeerConnectionInterface::kRelay;
                 options.engine = [] {
@@ -89,7 +151,6 @@ int main(int argc, char** argv) {
                     if (peer.peerId == "stalled") return peer.appliedRevision == revision;
                 return false;
             });
-            StreamPreferences preferences;
             run([&] {
                 preferences = host->StreamSettings().preferences;
                 preferences.videoPaused = true;
@@ -150,14 +211,20 @@ int main(int argc, char** argv) {
                     Check(failed->current.labels.at("connectionState") != "connected");
                 }
                 Check(host->StreamSettings().requestedRevision == revision);
+                if (!waiting->FailedPeers().empty())
+                    throw std::runtime_error("Viewer timed out while waiting for the first host offer");
+                Check(waitingEvidence->offers == 0 && waitingEvidence->frames == 0);
+                Check(host->Add("waiting"));
             });
+            wait([&] { return waitingEvidence->frames >= 5 && waitingEvidence->audio->audibleBlocks >= 10; });
+            run([&] { host->Remove("waiting"); waiting->Remove("host"); });
             const auto after = evidence->frames.load();
             wait([&] { return evidence->frames >= after + 30; });
             run([&] { host->Remove("healthy"); healthy->Remove("host"); });
             wait([&] { return !hostEvidence->captureDemand->load(); });
             stop();
             Check(!hostEvidence->captureDemand->load() && hostEvidence->capture->sources == 0 && hostEvidence->capture->resources == 0);
-            std::cout << "{\"passed\":true,\"unconnected_peer_capture_isolated\":true,\"idle_capture_frames\":" << idleFrames
+            std::cout << "{\"passed\":true,\"host_audio_activation_isolated\":true,\"unconnected_peer_capture_isolated\":true,\"idle_capture_frames\":" << idleFrames
                 << ",\"paused_capture_frames\":" << pausedFrames << ",\"idle_demand_audio_resume\":true}\n";
         } catch (...) { stop(); throw; }
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; result = 1; }

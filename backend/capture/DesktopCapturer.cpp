@@ -29,6 +29,7 @@
 #include <iostream>
 #include <sstream>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 extern "C" HRESULT WINAPI CreateDirect3D11DeviceFromDXGIDevice(
@@ -550,6 +551,7 @@ void DesktopCapturer::ResetGraphicsResources()
     nv12VertexShader_.Reset();
     nv12LumaPixelShader_.Reset();
     nv12ChromaPixelShader_.Reset();
+    nv12Completion_.Reset();
     context_.Reset();
     device_.Reset();
     std::memset(&sourceTextureDesc_, 0, sizeof(sourceTextureDesc_));
@@ -1531,10 +1533,11 @@ void DesktopCapturer::EnsureNv12Textures(int width, int height)
         "ID3D11Device::CreateTexture2D(NV12 staging)");
 }
 
-void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D11_TEXTURE2D_DESC& bgraDesc, CapturedFrame& frame)
+Microsoft::WRL::ComPtr<ID3D11Query> DesktopCapturer::GenerateNv12Frame(
+    ID3D11Texture2D* bgraTexture, const D3D11_TEXTURE2D_DESC& bgraDesc, CapturedFrame& frame)
 {
     if (!config_.includeNv12) {
-        return;
+        return {};
     }
 
     const int width = static_cast<int>(bgraDesc.Width);
@@ -1599,35 +1602,47 @@ void DesktopCapturer::GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D1
         Microsoft::WRL::ComPtr<ID3D11Texture2D> snapshot;
         ThrowIfFailed(device_->CreateTexture2D(&description, nullptr, &snapshot), "Owned NV12 texture");
         context_->CopyResource(snapshot.Get(), textureSet.texture.Get());
-        D3D11_QUERY_DESC queryDescription{D3D11_QUERY_EVENT, 0};
-        Microsoft::WRL::ComPtr<ID3D11Query> completion;
-        ThrowIfFailed(device_->CreateQuery(&queryDescription, &completion), "Capture completion query");
+        // Cache only a completed query. Failure or timeout discards this one
+        // so the next frame can never observe a previous submission's result.
+        auto completion = std::move(nv12Completion_);
+        if (!completion) {
+            D3D11_QUERY_DESC queryDescription{D3D11_QUERY_EVENT, 0};
+            ThrowIfFailed(device_->CreateQuery(&queryDescription, &completion), "Capture completion query");
+        }
         context_->End(completion.Get());
         context_->Flush();
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
-        for (;;) {
-            BOOL complete = FALSE;
-            const auto status = context_->GetData(completion.Get(), &complete, sizeof(complete), D3D11_ASYNC_GETDATA_DONOTFLUSH);
-            ThrowIfFailed(status, "Capture GPU completion");
-            if (status == S_OK && complete) break;
-            const HRESULT reason = device_->GetDeviceRemovedReason();
-            if (FAILED(reason)) throw CaptureDeviceLostError(reason);
-            // Never publish an unfinished texture. A busy game can exceed this
-            // frame's budget without losing the source or graphics device.
-            if (std::chrono::steady_clock::now() >= deadline) throw CaptureGpuTimeoutError();
-            thread_local ShortWait completionWait;
-            completionWait.Wait();
-        }
         frame.nv12Texture = std::move(snapshot);
-        frame.nv12OwnedAndComplete = true;
+        return completion;
     }
 
-    if (!config_.includeNv12Readback) {
-        context_->Flush();
-        return;
-    }
+    if (!config_.includeNv12Readback) context_->Flush();
+    return {};
+}
 
-    context_->CopyResource(nv12StagingTexture_.Get(), textureSet.texture.Get());
+void DesktopCapturer::CompleteNv12Frame(Microsoft::WRL::ComPtr<ID3D11Query> completion, CapturedFrame& frame)
+{
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(50);
+    for (;;) {
+        BOOL complete = FALSE;
+        const auto status = context_->GetData(completion.Get(), &complete, sizeof(complete), D3D11_ASYNC_GETDATA_DONOTFLUSH);
+        ThrowIfFailed(status, "Capture GPU completion");
+        if (status == S_OK && complete) break;
+        const HRESULT reason = device_->GetDeviceRemovedReason();
+        if (FAILED(reason)) throw CaptureDeviceLostError(reason);
+        // Never publish an unfinished texture. A busy game can exceed this
+        // frame's budget without losing the source or graphics device.
+        if (std::chrono::steady_clock::now() >= deadline) throw CaptureGpuTimeoutError();
+        thread_local ShortWait completionWait;
+        completionWait.Wait();
+    }
+    nv12Completion_ = std::move(completion);
+    frame.nv12OwnedAndComplete = true;
+}
+
+void DesktopCapturer::ReadNv12Pixels(CapturedFrame& frame)
+{
+    const int width = frame.width, height = frame.height;
+    context_->CopyResource(nv12StagingTexture_.Get(), frame.nv12Texture.Get());
 
     frame.nv12Pixels.resize(static_cast<size_t>(width) * height * 3 / 2);
     auto* nv12 = reinterpret_cast<uint8_t*>(frame.nv12Pixels.data());
@@ -1665,7 +1680,11 @@ std::optional<CapturedFrame> DesktopCapturer::ReadTextureFrame(
         ThrowIfFailed(device_.As(&protection), "Capture context protection");
         protection->Enter();
     }
-    struct Unlock { ID3D10Multithread* value; ~Unlock() { if (value) value->Leave(); } } unlock{protection.Get()};
+    struct Unlock {
+        ID3D10Multithread* value;
+        void Release() { if (auto* lock = std::exchange(value, nullptr)) lock->Leave(); }
+        ~Unlock() { Release(); }
+    } unlock{protection.Get()};
     ID3D11Texture2D* outputTexture = ScaleFrameIfNeeded(sourceTexture, sourceDesc);
     if (cursor_) outputTexture = cursor_->Composite(device_.Get(), context_.Get(), outputTexture, sourceDesc.Width, sourceDesc.Height);
 
@@ -1684,7 +1703,13 @@ std::optional<CapturedFrame> DesktopCapturer::ReadTextureFrame(
     frame.colorConversionMode = lastColorConversionMode_;
     frame.lastPresentTimeQpc = presentTimeQpc;
 
-    GenerateNv12Frame(outputTexture, outputDesc, frame);
+    if (auto completion = GenerateNv12Frame(outputTexture, outputDesc, frame)) {
+        // The submitted snapshot is private until its fence completes. Let
+        // encoders and scalers submit work while capture waits for the GPU.
+        if (!config_.includeNv12Readback && !config_.includeBgraReadback) unlock.Release();
+        CompleteNv12Frame(std::move(completion), frame);
+    }
+    if (frame.nv12GeneratedOnGpu && config_.includeNv12Readback) ReadNv12Pixels(frame);
 
     if (!config_.includeBgraReadback) {
         frame.rowPitch = static_cast<uint32_t>(frame.width) * 4;
@@ -1789,21 +1814,30 @@ std::optional<CapturedFrame> DesktopCapturer::TryCaptureWindowsGraphicsFrame(std
     }
 }
 
+std::pair<int, int> CaptureConfig::OutputSize(int sourceWidth, int sourceHeight) const
+{
+    int width = sourceWidth;
+    int height = sourceHeight;
+    const auto fit = [&](int maxWidth, int maxHeight) {
+        const double scale = std::min({1.0, double(maxWidth) / width, double(maxHeight) / height});
+        width = std::max(1, int(width * scale));
+        height = std::max(1, int(height * scale));
+    };
+    if (fitWithinTarget && targetWidth > 0 && targetHeight > 0) {
+        fit(targetWidth, targetHeight);
+    } else {
+        if (targetWidth > 0) width = targetWidth;
+        if (targetHeight > 0) height = targetHeight;
+    }
+    if (maxOutputWidth > 0 && maxOutputHeight > 0) fit(maxOutputWidth, maxOutputHeight);
+    if (includeNv12) return {PositiveEvenDimension(width), PositiveEvenDimension(height)};
+    return {width, height};
+}
+
 ID3D11Texture2D* DesktopCapturer::ScaleFrameIfNeeded(ID3D11Texture2D* sourceTexture, const D3D11_TEXTURE2D_DESC& sourceDesc)
 {
     lastColorConversionMode_ = 0;
-    int outputWidth = config_.targetWidth > 0 ? config_.targetWidth : static_cast<int>(sourceDesc.Width);
-    int outputHeight = config_.targetHeight > 0 ? config_.targetHeight : static_cast<int>(sourceDesc.Height);
-    if (config_.fitWithinTarget && config_.targetWidth > 0 && config_.targetHeight > 0) {
-        const double scale = std::min({1.0, double(config_.targetWidth) / sourceDesc.Width,
-            double(config_.targetHeight) / sourceDesc.Height});
-        outputWidth = std::max(1, int(sourceDesc.Width * scale));
-        outputHeight = std::max(1, int(sourceDesc.Height * scale));
-    }
-    if (config_.includeNv12) {
-        outputWidth = PositiveEvenDimension(outputWidth);
-        outputHeight = PositiveEvenDimension(outputHeight);
-    }
+    const auto [outputWidth, outputHeight] = config_.OutputSize(sourceDesc.Width, sourceDesc.Height);
     const uint32_t colorConversionMode = ColorConversionMode(sourceDesc.Format, outputColorSpace_, config_.hdrToSdr, outputHdrActive_);
     const bool needsColorTransform = colorConversionMode != 0;
     const bool needsTransform =

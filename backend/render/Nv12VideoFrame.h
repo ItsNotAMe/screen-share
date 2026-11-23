@@ -1,12 +1,15 @@
 #pragma once
+#include <chrono>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <span>
 #include <vector>
 #include "input/v2/FrameMapping.h"
 struct ID3D11Texture2D;
 
 namespace screenshare {
+inline constexpr auto kVideoFrameFreshnessTimeout = std::chrono::seconds(2);
 // The owner retains both device and immutable visible NV12 texture. CPU access
 // is an explicit, cached fallback for offscreen rendering and image assertions.
 class NativeNv12Frame {
@@ -25,6 +28,8 @@ struct Nv12VideoFrame {
     std::shared_ptr<const uint8_t> retainedPixels;
     size_t retainedBytes = 0;
     std::shared_ptr<const NativeNv12Frame> native;
+    // Local decoder callback time, on the same clock as the presentation owner.
+    std::optional<std::chrono::steady_clock::time_point> receivedAt;
     std::span<const uint8_t> pixels() const {
         if (native) return native->pixels();
         return retainedPixels ? std::span<const uint8_t>(retainedPixels.get(), retainedBytes) : std::span<const uint8_t>(nv12);

@@ -142,7 +142,8 @@ RoomSessionConfig ParseRoomSessionConfig(const QJsonObject& object, bool loopbac
     }
     const auto capture = Object(object, "capture"); Keys(capture, {"display", "window", "fps"});
     result.media.capture.displayIndex = Integer(capture, "display", 0, 0, 63);
-    result.media.capture.targetFps = Integer(capture, "fps", result.media.preferences.fps, 1, 240);
+    // Active stream settings drive capture cadence within this ceiling.
+    result.media.capture.targetFps = Integer(capture, "fps", kMaxEncodedFps, 1, 240);
     if (capture.contains("window")) {
         if (capture.contains("display")) throw std::invalid_argument("Choose a display or window");
         bool ok = false; const auto handle = String(capture, "window").toULongLong(&ok, 0);

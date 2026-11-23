@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 #include <d3d11.h>
@@ -74,6 +75,9 @@ struct CaptureConfig {
     // Treat both target dimensions as upper bounds, preserving aspect ratio
     // without upscaling. Used for small BGRA previews before GPU readback.
     bool fitWithinTarget = false;
+    // Optional output ceiling, applied after the requested resize.
+    int maxOutputWidth = 0;
+    int maxOutputHeight = 0;
     int targetFps = 60;
     CaptureBackend backend = CaptureBackend::WindowsGraphicsCapture;
     bool allowDisplayFallback = false;
@@ -86,6 +90,7 @@ struct CaptureConfig {
     bool hdrToSdr = true;
     float hdrSdrWhiteNits = 203.0f;
     float hdrSdrBgraExposure = 0.88f;
+    [[nodiscard]] std::pair<int, int> OutputSize(int sourceWidth, int sourceHeight) const;
 };
 
 struct CapturedFrame {
@@ -124,6 +129,12 @@ public:
     static std::vector<WindowCaptureInfo> EnumerateWindows();
 
     void Start(const CaptureConfig& config);
+    // Capture-owner thread only. Resize output without reopening the capture item.
+    // Existing fitWithinTarget/no-upscale policy still applies.
+    void SetTargetSize(int width, int height) {
+        config_.targetWidth = width;
+        config_.targetHeight = height;
+    }
     void Stop();
     // Owner thread only. Preserve the original WGC item, never reselect by HWND.
     // Caller must retire encoders using the old device before invoking this.
@@ -160,7 +171,10 @@ private:
     void EnsureNv12InputTexture(const D3D11_TEXTURE2D_DESC& bgraDesc);
     void EnsureNv12Textures(int width, int height);
     ID3D11Texture2D* ScaleFrameIfNeeded(ID3D11Texture2D* sourceTexture, const D3D11_TEXTURE2D_DESC& sourceDesc);
-    void GenerateNv12Frame(ID3D11Texture2D* bgraTexture, const D3D11_TEXTURE2D_DESC& bgraDesc, CapturedFrame& frame);
+    Microsoft::WRL::ComPtr<ID3D11Query> GenerateNv12Frame(ID3D11Texture2D* bgraTexture,
+        const D3D11_TEXTURE2D_DESC& bgraDesc, CapturedFrame& frame);
+    void CompleteNv12Frame(Microsoft::WRL::ComPtr<ID3D11Query> completion, CapturedFrame& frame);
+    void ReadNv12Pixels(CapturedFrame& frame);
     std::optional<CapturedFrame> ReadTextureFrame(
         ID3D11Texture2D* sourceTexture,
         const D3D11_TEXTURE2D_DESC& sourceDesc,
@@ -199,6 +213,7 @@ private:
     Microsoft::WRL::ComPtr<ID3D11VertexShader> nv12VertexShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> nv12LumaPixelShader_;
     Microsoft::WRL::ComPtr<ID3D11PixelShader> nv12ChromaPixelShader_;
+    Microsoft::WRL::ComPtr<ID3D11Query> nv12Completion_;
     std::unique_ptr<WindowsGraphicsCaptureState> wgc_;
     DXGI_COLOR_SPACE_TYPE outputColorSpace_ = DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709;
     bool outputHdrActive_ = false;

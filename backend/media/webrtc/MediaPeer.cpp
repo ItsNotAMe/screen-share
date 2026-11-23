@@ -6,8 +6,9 @@
 namespace screenshare::media {
 MediaPeer::MediaPeer(MediaEngine& engine, uint64_t generation,
     webrtc::VideoSinkInterface<webrtc::VideoFrame>* frames, ChannelReady channelReady,
-    webrtc::PeerConnectionInterface::RTCConfiguration config, std::shared_ptr<DiagnosticHistory> diagnostics)
-    : lifecycle(generation, PeerConnectionLifecycle::Clock::now()),
+    webrtc::PeerConnectionInterface::RTCConfiguration config, std::shared_ptr<DiagnosticHistory> diagnostics,
+    PeerConnectionLifecycle::StartMode start)
+    : lifecycle(generation, PeerConnectionLifecycle::Clock::now(), start),
       signaling_(webrtc::Thread::Current()), frames_(frames),
       channelReady_(std::move(channelReady)), diagnostics_(diagnostics ? std::move(diagnostics) : std::make_shared<DiagnosticHistory>()) {
     if (!generation) throw std::invalid_argument("Peer generation must be nonzero");

@@ -60,13 +60,14 @@ struct Evidence : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
     std::atomic<unsigned> offers{0};
     std::atomic<unsigned> smallFrames{0};
     std::shared_ptr<proof::CaptureLifetime> capture = std::make_shared<proof::CaptureLifetime>();
-    std::shared_ptr<std::atomic<bool>> captureDemand = std::make_shared<std::atomic<bool>>(false);
+    std::shared_ptr<std::atomic<int>> captureDemand = std::make_shared<std::atomic<int>>(0);
     std::shared_ptr<proof::AudioEvidence> audio = std::make_shared<proof::AudioEvidence>();
     std::optional<PcmEndpointFactories> audioEndpoints;
     std::shared_ptr<PcmAudioDiagnostics> audioDiagnostics = std::make_shared<PcmAudioDiagnostics>();
     MediaEngine::PacketFactory packetFactory;
     MediaEngine::EventLogFactory eventLogFactory;
     CaptureSession::Factory captureFactory;
+    std::function<bool()> engineReady;
     bool switchableCapture = false;
     std::optional<StreamPreferences> preferences;
     bool fastAudioExperiment = false; // Retained proof/report flag; the engine now enables fast recovery by default.
@@ -135,6 +136,7 @@ public:
             return std::make_unique<MediaEngine>(CreatePcmAudioDeviceModule(endpoints,
                 diagnostics), std::make_unique<MfVideoEncoderFactory>(), std::make_unique<MfVideoDecoderFactory>(), packetFactory, eventLogFactory);
         };
+        options.engineReady = evidence_->engineReady;
         options.capture = [lifetime = evidence_->capture, demand = evidence_->captureDemand] { return std::make_unique<proof::ObservedCaptureSource>(lifetime, demand); };
         if (evidence_->captureFactory) options.capture = evidence_->captureFactory;
         if (evidence_->switchableCapture) options.captureForSelection = [lifetime = evidence_->capture, demand = evidence_->captureDemand](auto) -> CaptureSession::Factory {

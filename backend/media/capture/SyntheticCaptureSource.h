@@ -14,7 +14,7 @@ struct SyntheticCaptureResource final : CaptureResource {
 class SyntheticCaptureSource final : public ICaptureSource {
 public:
     SyntheticCaptureSource(int width = 640, int height = 360, int fps = 60,
-        std::shared_ptr<std::atomic<bool>> demand = {})
+        std::shared_ptr<std::atomic<int>> demand = {})
         : width_(width), height_(height), demand_(std::move(demand)), cadence_(fps) {
         if (width < 2 || height < 2 || width > 3840 || height > 2160 || fps < 1 || fps > 240)
             throw std::invalid_argument("Invalid synthetic capture dimensions/rate");
@@ -22,7 +22,7 @@ public:
     void Start() override { cadence_.Reset(); }
     std::optional<CaptureSample> Poll() override {
         const auto now = std::chrono::steady_clock::now();
-        if (!cadence_.Due(now, !demand_ || demand_->load(std::memory_order_relaxed))) return std::nullopt;
+        if (!(demand_ ? cadence_.Due(now, demand_->load(std::memory_order_relaxed)) : cadence_.Due(now))) return std::nullopt;
         cadence_.Sampled(now);
         auto frame = std::make_shared<SyntheticCaptureResource>();
         frame->width = width_; frame->height = height_;
@@ -40,7 +40,7 @@ public:
 private:
     int width_, height_;
     uint64_t index_ = 0;
-    const std::shared_ptr<std::atomic<bool>> demand_;
+    const std::shared_ptr<std::atomic<int>> demand_;
     CaptureCadence cadence_;
 };
 }

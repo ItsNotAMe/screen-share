@@ -2,15 +2,18 @@
 #include "capture/DxgiCursor.h"
 #include "media/capture/WindowsCaptureSource.h"
 #include "media/capture/SwitchableCaptureSource.h"
+#include "media/webrtc/CaptureVideoSource.h"
 #include "input/v2/DesktopSink.h"
 #include "core/WindowsMediaRuntime.h"
 #include "core/ShortWait.h"
 #include "CaptureTestWindow.h"
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <iostream>
 #include <string_view>
 #include <iomanip>
+#include <vector>
 
 using namespace screenshare;
 using namespace screenshare::media;
@@ -218,7 +221,7 @@ void CaptureDemand(bool benchmark) {
             SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         SetTimer(window.handle(), 1, 10, nullptr);
     });
-    auto demand = std::make_shared<std::atomic<bool>>(false);
+    auto demand = std::make_shared<std::atomic<int>>(0);
     auto target = std::make_shared<input::DesktopTargetState>();
     CaptureConfig config; config.sourceType = CaptureSourceType::Window;
     config.windowHandle = reinterpret_cast<uint64_t>(window.handle()); config.targetFps = 60;
@@ -239,7 +242,7 @@ void CaptureDemand(bool benchmark) {
     };
     if (benchmark) for (unsigned pair = 0; pair < 6; ++pair) {
         for (bool active : {pair % 2 == 0, pair % 2 != 0}) {
-            *demand = active;
+            *demand = active ? 60 : 0;
             unsigned ignored = 0, ignoredConversions = 0; pump(500ms, ignored, ignoredConversions);
             unsigned samples = 0, converted = 0;
             const auto cpu = CaptureCpuMs(); const auto begin = std::chrono::steady_clock::now();
@@ -264,18 +267,18 @@ void CaptureDemand(bool benchmark) {
         const auto pixels = resource->buffer->ToNv12(); Require(bool(pixels), "Demand proof readback failed");
         return pixels->DataY()[(pixels->height() / 2) * pixels->StrideY() + pixels->width() / 2];
     };
-    *demand = false; paint(80);
+    *demand = 0; paint(80);
     Wait([&] { if (auto frame = source.Poll()) sample = std::move(frame); return center() >= 80 && center() <= 95; });
     const auto identity = target->Read().generation;
     paint(110); std::this_thread::sleep_for(50ms);
     paint(170); std::this_thread::sleep_for(60ms);
-    *demand = true;
+    *demand = 60;
     const auto awake = std::chrono::steady_clock::now(); sample = source.Poll();
     Require(bool(sample), "Active capture waited for the idle frame slot");
     const auto wakeMs = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - awake).count();
     Require(center() >= 150, "Resumed capture converted an older queued WGC frame");
     Require(target->Read().generation == identity, "Demand change rotated the input identity");
-    *demand = false;
+    *demand = 0;
     window.Invoke([&] { ShowWindow(window.handle(), SW_MINIMIZE); });
     Wait([&] { source.Poll(); return source.Minimized(); });
     unsigned ignored = 0, ignoredConversions = 0; pump(1200ms, ignored, ignoredConversions);
@@ -287,6 +290,87 @@ void CaptureDemand(bool benchmark) {
     Require(target->Read().generation == 0, "Idle source closure retained input geometry");
     std::cout << "Capture demand: newest first frame, immediate wake (" << wakeMs
         << " ms), input identity, minimize/restore and close passed\n";
+}
+void StreamRateBenchmark(bool compareRates) {
+    using namespace std::chrono_literals;
+    WindowsMediaRuntime runtime;
+    Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
+    proof::TestWindow window;
+    window.Invoke([&] {
+        SetWindowLongPtrW(window.handle(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
+        Require(SetWindowPos(window.handle(), nullptr, 0, 0, 1920, 1080,
+            SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED), "Benchmark window resize failed");
+        SetTimer(window.handle(), 1, 10, nullptr);
+    });
+    auto demand = std::make_shared<std::atomic<int>>(60);
+    CaptureConfig config;
+    config.sourceType = CaptureSourceType::Window;
+    config.windowHandle = reinterpret_cast<uint64_t>(window.handle());
+    auto track = webrtc::make_ref_counted<CaptureVideoSource>();
+    StreamPreferences preferences;
+    preferences.resolution = ResolutionMode::Native;
+    preferences.fps = compareRates ? 30 : 60;
+    track->Configure(preferences, 1);
+    struct Sink final : webrtc::VideoSinkInterface<webrtc::VideoFrame> {
+        unsigned frames = 0;
+        std::vector<double> gaps;
+        std::chrono::steady_clock::time_point last{};
+        void OnFrame(const webrtc::VideoFrame& frame) override {
+            Require(frame.width() == 1920 && frame.height() == 1080, "Benchmark frame dimensions changed");
+            const auto now = std::chrono::steady_clock::now();
+            if (frames++) gaps.push_back(std::chrono::duration<double, std::milli>(now - last).count());
+            last = now;
+        }
+    } sink;
+    track->AddOrUpdateSink(&sink, webrtc::VideoSinkWants());
+    WindowsCaptureSource capture(config, {}, {}, demand);
+    capture.Start();
+    ShortWait timer;
+    std::shared_ptr<CaptureResource> previous;
+    auto captureCycles = [] {
+        ULONG64 cycles = 0;
+        Require(QueryThreadCycleTime(GetCurrentThread(), &cycles), "Capture CPU cycle query failed");
+        return cycles;
+    };
+    auto pump = [&](std::chrono::milliseconds duration, unsigned& samples, unsigned& converted) {
+        const auto until = std::chrono::steady_clock::now() + duration;
+        while (std::chrono::steady_clock::now() < until) {
+            if (auto frame = capture.Poll()) {
+                ++samples;
+                converted += frame->resource != previous;
+                previous = std::move(frame->resource);
+                const auto pixels = std::static_pointer_cast<WindowsCaptureResource>(previous);
+                track->PushBuffer(pixels->buffer, frame->capturedAt);
+            }
+            timer.Wait();
+        }
+    };
+    const auto measure = [&](int pair, int rate) {
+        *demand = rate;
+        unsigned samples = 0, converted = 0;
+        pump(500ms, samples, converted);
+        samples = converted = sink.frames = 0;
+        sink.gaps.clear();
+        const auto cpu = CaptureCpuMs();
+        const auto cyclesBefore = captureCycles();
+        const auto start = std::chrono::steady_clock::now();
+        pump(2000ms, samples, converted);
+        const auto wall = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+        const auto cycles = captureCycles() - cyclesBefore;
+        const auto used = CaptureCpuMs() - cpu;
+        Require(sink.frames >= (compareRates ? 56u : 114u) && sink.frames <= unsigned(preferences.fps * 2 + 2),
+            "Capture did not sustain the requested track rate");
+        std::sort(sink.gaps.begin(), sink.gaps.end());
+        std::cout << std::fixed << std::setprecision(4) << "CAPTURE_FPS {\"pair\":" << pair
+            << ",\"rate\":" << rate << ",\"cpuMs\":" << used << ",\"captureCycles\":" << cycles << ",\"wallMs\":" << wall
+            << ",\"samples\":" << samples << ",\"converted\":" << converted << ",\"frames\":" << sink.frames
+            << ",\"gapP95Ms\":" << sink.gaps[sink.gaps.size() * 95 / 100] << "}\n" << std::flush;
+    };
+    if (compareRates) {
+        // The 30 FPS track receives both 60 and 30 FPS capture in alternating order.
+        for (int pair = 0; pair < 6; ++pair) for (int rate : {pair % 2 ? 30 : 60, pair % 2 ? 60 : 30}) measure(pair, rate);
+    } else measure(0, 60);
+    track->RemoveSink(&sink);
 }
 void SourceSwitches() {
     WindowsMediaRuntime runtime;
@@ -374,6 +458,43 @@ void PreviewReadback() {
         capture.Stop();
     }
 }
+void OversizedSource() {
+    WindowsMediaRuntime runtime;
+    Require(SUCCEEDED(runtime.result()), "MTA runtime failed");
+    proof::TestWindow window;
+    const auto resize = [&](int width, int height) {
+        window.Invoke([&] {
+            SetWindowLongPtrW(window.handle(), GWL_STYLE, WS_POPUP | WS_VISIBLE);
+            Require(SetWindowPos(window.handle(), nullptr, 0, 0, width, height,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED), "Proof window resize failed");
+        });
+    };
+    resize(5120, 1440);
+    CaptureConfig config;
+    config.sourceType = CaptureSourceType::Window;
+    config.windowHandle = reinterpret_cast<uint64_t>(window.handle());
+    auto target = std::make_shared<input::DesktopTargetState>();
+    WindowsCaptureSource source(config, target);
+    source.Start();
+    const auto verify = [&](int width, int height, int outputWidth, int outputHeight) {
+        Wait([&] {
+            const auto sample = source.Poll();
+            if (!sample) return false;
+            const auto geometry = target->Read();
+            if (geometry.target.width != width || geometry.target.height != height) return false;
+            const auto resource = std::static_pointer_cast<WindowsCaptureResource>(sample->resource);
+            Require(resource->buffer->width() == outputWidth && resource->buffer->height() == outputHeight,
+                "Oversized capture produced incorrect NV12 dimensions");
+            Require(geometry.generation && geometry.generation == resource->inputGeneration && geometry.target.mouseMapped,
+                "Capture resize lost the original input geometry");
+            return true;
+        });
+        std::cout << "Room capture " << width << 'x' << height << " -> " << outputWidth << 'x' << outputHeight << '\n';
+    };
+    verify(5120, 1440, 3840, 1080);
+    resize(1280, 720);
+    verify(1280, 720, 1280, 720);
+}
 int main(int argc, char** argv) try {
     Policy(); CursorPixels();
     if (argc > 1 && std::string_view(argv[1]) == "--live") WindowLifecycle();
@@ -381,7 +502,10 @@ int main(int argc, char** argv) try {
     if (argc > 1 && std::string_view(argv[1]) == "--cadence") StaticCadence();
     if (argc > 1 && std::string_view(argv[1]) == "--demand") CaptureDemand(true);
     if (argc > 1 && std::string_view(argv[1]) == "--demand-check") CaptureDemand(false);
+    if (argc > 1 && std::string_view(argv[1]) == "--stream-rate") StreamRateBenchmark(true);
+    if (argc > 1 && std::string_view(argv[1]) == "--capture-60") StreamRateBenchmark(false);
     if (argc > 1 && std::string_view(argv[1]) == "--switch") SourceSwitches();
     if (argc > 1 && std::string_view(argv[1]) == "--preview") PreviewReadback();
+    if (argc > 1 && std::string_view(argv[1]) == "--large-source") OversizedSource();
     std::cout << "Capture backend checks passed\n"; return 0;
 } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }

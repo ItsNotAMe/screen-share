@@ -7,6 +7,71 @@ native D3D surface. See [runtime ownership](../docs/architecture.md) and
 notes no longer describe current routing. Do not remove production capture,
 codec or input code merely because the legacy diagnostics also use it.
 
+2026-11-23 room signaling recovery: count one outage from a transport failure
+or timeout until the next authoritative snapshot. Failed handshake retries
+share its 35-second deadline. Four distinct outages in a rolling minute still
+end the session. The loopback proof refuses the first three retry handshakes
+and verifies reattachment, resumed media and input, and isolation of a healthy
+viewer. The previous logic ended the room before a fourth retry could connect.
+
+2026-11-23 viewer audio startup: acknowledge WebRTC playout startup before
+opening the Windows output. The first write opens and primes the device with
+silence on the same playout worker, then subsequent writes use current PCM.
+Initial failure uses the existing bounded retry delay. A default-route change
+during activation discards the outdated output without counting a failure.
+The loopback regression delays initial activation until five video frames
+arrive, then checks audible audio. The old path blocks those frames.
+
+2026-11-23 oversized sources: room capture fits its GPU output within the
+3840x2160 stream limit before retaining NV12. Very wide and tall sources keep
+their aspect ratio to even-pixel precision. WGC/DXGI input mapping still uses
+the original capture bounds. The ceiling applies on initial capture, resize
+and source replacement. Preview and legacy capture retain their own bounds.
+`NativeCaptureTests --large-source` verifies owned NV12 from a generated WGC
+window at 5120x1440 and after resizing it to 1280x720, including input geometry.
+
+2026-11-23 viewer frame age: carry local decoder receipt time through the
+latest-frame queue and renderer. Frames that reach two seconds in these queues
+expire before conversion or upload. Delayed presentation or redraw cannot make
+an old image count as fresh for remote input. The CLI preview also checks age
+before upload, and handoff reports count expired frames separately. Tests cover
+the originally refreshed timestamp, stale-frame drops and fresh-frame recovery.
+This measures local decoded-frame age only.
+
+2026-11-23 host audio startup: begin the PCM timeline while the existing producer
+opens the initial device. WebRTC can start video and send paced silence while
+activation is pending. The five-second missing-audio deadline now includes the
+initial open. The selected source and revision survive timed-out activation and
+retry. Native endpoints must cooperate with cancellation. A loopback test holds
+initial activation until the viewer receives video, then checks audible PCM on
+the same connection. The old path stalls that video. Clock-supplied tests also
+cover timed-out initial activation and retry with the pinned device.
+
+2026-11-23 first media offer: an admitted viewer waits in AwaitingOffer while
+the host prepares capture. The first offer arms the viewer's 20-second media
+connection deadline once. Membership and signaling still govern departure and
+closure. Host connection and ICE restart bounds remain. The native regression
+fails on the old path after an offerless wait over 20 seconds and verifies that
+late video/audio arrives in the same peer while an offered but unreachable peer
+still times out. Clock tests verify expiry and prevent extension by later offers.
+
+2026-11-23 capture startup: after admission, a failed initial source construction
+or Start now enters SourceUnavailable with its failure reason. The room and
+selection mailbox survive. The capture owner releases partial native state and
+waits for an explicit replacement. Ordinary sources and consumer faults retain
+terminal handling. Regression coverage checks rejected and successful replacements,
+and the loopback room proof uses a first-device barrier with waiting viewers.
+
+2026-11-23 unreadable encoder input: a failed pixel read or conversion before
+MF submission drops just that frame. The transform keeps its reference chain
+and any pending keyframe request carries forward. Input failures get a separate
+diagnostic and do not trigger hardware quarantine. Actual transform failures
+retain their existing handling. The regression reproduces permanent loss of
+video on the old path and verifies the next frame after both null and thrown
+reads, with normal delta output and requested keyframe output respectively.
+The native encoder checks also passed for shared GPU readback and hardware
+texture submission. These checks use generated inputs.
+
 2026-11-07 viewer render stalls: WASAPI output writes now expire an unfinished
 10 ms PCM block after one second, even if waits succeed or tiny partial writes
 occur. Fresh capacity is checked first; a delayed owner can complete a healthy

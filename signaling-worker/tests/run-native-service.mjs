@@ -45,12 +45,19 @@ try {
     // Drop a native client's socket while delaying its server-side close
     // notification. Its automatic reattachment must retire the remote peer.
     export class V2Room extends BaseRoom {
-      constructor(ctx, env) { super(ctx, env); this.testContext = ctx; this.retired = new WeakSet(); }
+      constructor(ctx, env) { super(ctx, env); this.testContext = ctx; this.retired = new WeakSet(); this.refusedUpgrades = 0; }
       async fetch(request) {
         const url = new URL(request.url);
+        // The other members are already attached. Simulate an unavailable
+        // signaling endpoint for the dropped client's first three retries.
+        if (url.pathname === '/events' && this.refusedUpgrades > 0) {
+          --this.refusedUpgrades;
+          return new Response(null, { status: 503 });
+        }
         if (url.pathname !== '/test/reconnect') return super.fetch(request);
         const sockets = this.testContext.getWebSockets(url.searchParams.get('peer')).filter(ws => ws.readyState === 1);
         if (sockets.length !== 1) return new Response(null, { status: 409 });
+        if (url.searchParams.get('outage') === '1') this.refusedUpgrades = 3;
         this.retired.add(sockets[0]); sockets[0].close(1001, 'test_reconnect');
         return new Response(null, { status: 204 });
       }
@@ -61,7 +68,11 @@ try {
       if (url.hostname !== '127.0.0.1') return new Response(null, { status: 403 });
       ${fault === 'socket-reconnect' ? `
       const reconnect = url.pathname.match(/^\\/test\\/reconnect\\/([A-Za-z0-9_-]+)\\/([A-Za-z0-9_-]+)$/);
-      if (reconnect) return env.V2_ROOMS.get(env.V2_ROOMS.idFromName(reconnect[1])).fetch('https://internal/test/reconnect?peer=' + reconnect[2]);
+      if (reconnect) {
+        const room = env.V2_ROOMS.get(env.V2_ROOMS.idFromName(reconnect[1]));
+        const outage = url.searchParams.get('outage') === '1' ? '1' : '0';
+        return room.fetch('https://internal/test/reconnect?peer=' + reconnect[2] + '&outage=' + outage);
+      }
       ` : ''}
       url.protocol = 'https:';
       const headers = new Headers(request.headers); headers.set('CF-Connecting-IP', '127.0.0.1');

@@ -19,7 +19,8 @@ public:
     MediaPeer(MediaEngine& engine, uint64_t generation,
         webrtc::VideoSinkInterface<webrtc::VideoFrame>* frames,
         ChannelReady channelReady,
-        webrtc::PeerConnectionInterface::RTCConfiguration config = {}, std::shared_ptr<DiagnosticHistory> diagnostics = {});
+        webrtc::PeerConnectionInterface::RTCConfiguration config = {}, std::shared_ptr<DiagnosticHistory> diagnostics = {},
+        PeerConnectionLifecycle::StartMode start = PeerConnectionLifecycle::StartMode::Connecting);
     ~MediaPeer() override;
     MediaPeer(const MediaPeer&) = delete;
     MediaPeer& operator=(const MediaPeer&) = delete;

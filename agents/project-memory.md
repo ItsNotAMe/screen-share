@@ -12,6 +12,24 @@ commit each separately. Address related UI defects when they block that feature.
 The owner also requested actual compute-time measurements for optimizations;
 distinguish process CPU, elapsed encoder work and end-to-end sharing latency.
 
+## Restore sharp, smooth host monitoring previews - 2026-11-07
+
+Owner reported poor host preview quality after v1.0.13. The 026b258 preview
+optimization (already in v1.0.12) limited host capture to 640x360 and five FPS;
+SourcePreviewLabel enlarged that image and also discarded high-DPI detail via
+a logical-size intermediate. Restore host-only 30 FPS and publish the viewport's
+physical pixel bounds atomically to the capture owner, capped at 2560x1440.
+DesktopCapturer.SetTargetSize changes GPU output bounds without reopening WGC.
+Keep aspect ratio/no-upscale, one queued UI image, cancellable waits and inactive,
+paused or minimized preview suspension. Create/chooser previews keep their lower
+budgets. Paint original pixmap pixels directly into the high-DPI backing surface.
+
+One-device-pixel regression passes at 1x/2x and fails with the original painter.
+Native Windows preview-quality mode passed; its text/detail renders were inspected.
+Release all build and 46 CTests passed (162.48 s). Live WGC capture remains
+unverified here because the Windows capture service is unavailable. This is a
+separate committed improvement after v1.0.13; do not modify published assets.
+
 ## Release viewer controls through their individual indicators - 2026-11-07
 
 Owner requested removing the separate viewer Release control button. Mouse,

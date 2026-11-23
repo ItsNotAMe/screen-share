@@ -225,9 +225,12 @@ void PresentationOwnership() {
     Check(FrameQueueDiagnostics(sink.statistics())["lastWaitMs"].isNull());
     std::atomic<int> destroyed{0};
     auto buffer = webrtc::make_ref_counted<CheckedNv12>(destroyed, 4); const auto* pixels = buffer->DataY();
+    const auto beforeArrival = std::chrono::steady_clock::now();
     sink.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(buffer).set_timestamp_us(9).build());
+    const auto afterArrival = std::chrono::steady_clock::now();
     auto frame = sink.Take(); buffer = nullptr;
     Check(frame && frame->retainedPixels && frame->nv12.empty() && frame->pixels().data() == pixels && frame->timestamp100ns == 90 && destroyed == 0);
+    Check(frame->receivedAt && *frame->receivedAt >= beforeArrival && *frame->receivedAt <= afterArrival);
     auto retained = *frame; frame.reset(); Check(retained.pixels()[0] == 42 && destroyed == 0);
     retained = {}; Check(destroyed == 1);
     buffer = webrtc::make_ref_counted<CheckedNv12>(destroyed, 8);
@@ -291,6 +294,17 @@ void PresentationOwnership() {
     Check(stopped.inFlight == 1 && !stopped.pending && stopped.discardedOnStop == 1);
     const auto finished = retiring.statistics();
     Check(finished.received == 2 && finished.delivered == 1 && finished.discardedOnStop == 1 && !finished.inFlight);
+
+    // Simulate the viewer thread resuming after a stall with one old frame and
+    // no new decoder output. Expire it without conversion or presentation.
+    LatestRoomVideoFrame delayed;
+    delayed.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(planar).build());
+    std::this_thread::sleep_for(screenshare::kVideoFrameFreshnessTimeout);
+    Check(!delayed.Take());
+    const auto expired = delayed.statistics();
+    Check(expired.expired == 1 && !expired.converted && !expired.delivered && !expired.inFlight && !expired.pending);
+    delayed.OnFrame(webrtc::VideoFrame::Builder().set_video_frame_buffer(planar).build());
+    Check(delayed.Take().has_value() && delayed.statistics().delivered == 1);
 }
 RoomRuntimeFactory Factory(const RoomSessionConfig& config, std::shared_ptr<proof::AudioEvidence> audio,
                            std::shared_ptr<LatestRoomVideoFrame> frames = {}) {
@@ -344,6 +358,11 @@ void CommandScenario() {
     Reject([&] { ParseRoomCommand(hostAudio + QStringList{"--audio", "shared", "--process-id", "12"}); });
     Reject([&] { ParseRoomCommand(hostAudio + QStringList{"--audio", "shared", "--audio-device", "output"}); });
     const QStringList base{"--backend", "v2", "--signal-server", "https://example.test", "--create-room"};
+    const auto thirtyFps = ParseRoomCommand(base + QStringList{"--fps", "30"});
+    Check(thirtyFps.media.preferences.fps == 30 && thirtyFps.media.capture.targetFps == 60);
+    const QJsonObject cappedCapture{{"origin", "https://example.test"}, {"host", true},
+        {"stream", QJsonObject{{"fps", 30}}}, {"capture", QJsonObject{{"fps", 45}}}};
+    Check(ParseRoomSessionConfig(cappedCapture).media.capture.targetFps == 45);
     auto config = ParseRoomCommand(base + QStringList{"--nickname", "  Player  ", "--resolution", "1920x1080", "--fps", "144", "--bitrate", "9000000"});
     Check(config.room.host && config.room.nickname == "Player" && config.media.preferences.resolution == ResolutionMode::Fixed &&
         config.media.preferences.width == 1920 && config.media.preferences.fps == 144 &&

@@ -32,6 +32,13 @@ counts survive replacement. Shared-source mode keeps its inner validated-target
 policy; explicit process IDs retain manual retry rather than following PID reuse.
 Native calls that do not honor cancellation still cannot be preempted in-process.
 
+The host PCM queue reserves eight 10 ms blocks within its existing 80 ms age
+limit. This preserves short bursts during active sharing and keeps the oldest
+block eligible for the next paced send. The queue drops the oldest blocks on
+overflow and expires stale audio after a stall. A gated regression queues an
+eight-block burst after the host has sent audio, then checks overflow, stale
+block discard and the return to fresh PCM.
+
 Viewer output now follows default-device notifications (render/console role)
 on the existing playout worker. Callbacks only advance an atomic revision;
 registration is retained until unregister, and activation races are not lost.
