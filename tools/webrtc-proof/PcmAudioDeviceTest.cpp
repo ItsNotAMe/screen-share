@@ -55,8 +55,7 @@ void Switches() {
         });
     auto capture = std::make_unique<SwitchablePcmCapture>(control); capture->Start();
     PcmBlock block; std::stop_source stop;
-    std::this_thread::sleep_for(100ms); capture->Read(block, stop.get_token());
-    Require(capture->DroppedFrames() >= 480 && capture->DelayMs() <= 80, "Capture backlog was not bounded");
+    Require(capture->Read(block, stop.get_token()), "Initial capture stopped");
     auto pump = [&](std::future<AudioUpdateResult>& future) {
         const auto deadline = std::chrono::steady_clock::now() + 6s;
         unsigned nonzero = 0;
@@ -158,6 +157,59 @@ void InactiveAudioSelection() {
     Require(original->live == 0 && replacement->live == 0 && !replacement->wrongThread,
         "Idle audio selection leaked endpoint ownership");
 }
+void ActiveCaptureBurstReserve() {
+    using namespace screenshare::media;
+    using namespace std::chrono_literals;
+    struct Burst {
+        std::mutex mutex;
+        std::condition_variable_any changed;
+        int16_t requested = 0, queued = 0;
+        void QueueThrough(int16_t last) {
+            std::unique_lock lock(mutex);
+            requested = last;
+            changed.notify_all();
+            Require(changed.wait_for(lock, 1s, [&] { return queued == last; }), "Capture did not queue the burst");
+        }
+    } burst;
+    class BurstCapture final : public PcmCaptureEndpoint {
+        Burst& burst_;
+        int16_t produced_ = 0;
+    public:
+        explicit BurstCapture(Burst& burst) : burst_(burst) {}
+        void Start() override {}
+        bool Read(PcmBlock& block, std::stop_token stop) override {
+            std::unique_lock lock(burst_.mutex);
+            // The producer calls Read again only after queueing the previous block.
+            burst_.queued = produced_;
+            burst_.changed.notify_all();
+            if (!burst_.changed.wait(lock, stop, [&] { return produced_ < burst_.requested; })) return false;
+            block.fill(++produced_);
+            return true;
+        }
+        uint32_t DelayMs() const override { return 0; }
+    };
+    auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, [&] { return std::make_unique<BurstCapture>(burst); });
+    SwitchablePcmCapture capture(control);
+    capture.Start();
+    AudioThreadTask scheduling(AudioWorker::Capture);
+    PcmBlock block;
+    Require(capture.Read(block, {}) && block[0] == 0, "Capture did not start its paced timeline");
+    burst.QueueThrough(1);
+    Require(capture.Read(block, {}) && block[0] == 1, "Burst proof did not start on active PCM");
+
+    burst.QueueThrough(9);
+    Require(capture.Read(block, {}) && block[0] == 2 && capture.DroppedFrames() == 0,
+        "Active capture dropped fresh PCM from an eight-block burst");
+
+    burst.QueueThrough(19);
+    Require(capture.Read(block, {}) && block[0] == 12 && capture.DroppedFrames() == 9 * 480 && capture.DelayMs() <= 80,
+        "Oversized burst did not retain only the newest eight blocks");
+    std::this_thread::sleep_for(100ms);
+    Require(capture.Read(block, {}) && block[0] == 0, "Capture replayed stale PCM after a stall");
+    burst.QueueThrough(20);
+    Require(capture.Read(block, {}) && block[0] == 20 && capture.DroppedFrames() == 16 * 480,
+        "Capture failed to resume fresh PCM or account for discarded blocks");
+}
 // A device that produces just after the old 10ms timeout used to cause one
 // silence block plus one immediate captured block per read interval.
 void BurstyCaptureCadence() {
@@ -181,6 +233,7 @@ void BurstyCaptureCadence() {
     };
     auto control = std::make_shared<AudioSwitchControl>(AudioSelection{}, [] { return std::make_unique<Bursty>(); });
     SwitchablePcmCapture capture(control);capture.Start();
+    AudioThreadTask scheduling(AudioWorker::Capture);
     int last=0, skipped=0, silent=0, gaps=0;
     for(int index=0;index<150;++index) {
         PcmBlock block;Require(capture.Read(block,{}),"Bursty capture stopped");
@@ -736,6 +789,7 @@ int main(int argc, char** argv) {
         if (argc == 2 && std::string(argv[1]) == "--native-capture-silent") { NativeCaptureSelections(); return 0; }
         if (argc == 2 && std::string(argv[1]) == "--scheduling") { SchedulingUnderLoad(); return 0; }
         Require(argc == 1 || (argc == 2 && std::string(argv[1]) == "--wasapi"), "Unknown audio proof option");
+        ActiveCaptureBurstReserve();
         capture_audio_recovery_test::Run();
         render_progress_test::Run(); routed_capture_test::Run(); InactiveAudioSelection(); OutputClockCadence(); BurstyCaptureCadence(); LateCaptureCadence(); audio_processing_test::Downmix(); audio_processing_test::Microphone(); Switches(); NoSharedAudio(); Playback(); AudioRecovery(); AutomaticPlaybackRecovery(); Run(argc == 2); return 0;
     }

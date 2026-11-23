@@ -107,6 +107,9 @@ private:
 };
 
 class SwitchablePcmCapture final : public PcmCaptureEndpoint {
+    static constexpr auto kBlockDuration = std::chrono::milliseconds(10);
+    static constexpr auto kMaxQueueAge = std::chrono::milliseconds(80);
+    static constexpr size_t kMaxQueuedBlocks = kMaxQueueAge / kBlockDuration;
     struct Producer {
         enum class State { Opening, Started, Failed };
         std::mutex mutex;
@@ -133,9 +136,9 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
                     if (stop.stop_requested()) break;
                     {
                         std::lock_guard lock(mutex);
-                        // PCM is continuous, unlike replaceable video frames.
-                        // Preserve short device bursts and scheduling jitter.
-                        if (blocks.size() == 6) { blocks.pop_front(); overflow += 480; }
+                        // Allow a burst to fill the existing freshness window.
+                        // The output clock still sends one block at a time.
+                        if (blocks.size() == kMaxQueuedBlocks) { blocks.pop_front(); overflow += 480; }
                         blocks.push_back({block, std::chrono::steady_clock::now()});
                         delay = device->DelayMs(); dropped = device->DroppedFrames() + overflow;
                     }
@@ -146,7 +149,7 @@ class SwitchablePcmCapture final : public PcmCaptureEndpoint {
         bool Pop(PcmBlock& block, uint32_t& latency, uint64_t& lost) {
             std::unique_lock lock(mutex);
             const auto now = std::chrono::steady_clock::now();
-            while (!blocks.empty() && now - blocks.front().at > std::chrono::milliseconds(80)) {
+            while (!blocks.empty() && now - blocks.front().at > kMaxQueueAge) {
                 blocks.pop_front(); expired += 480;
             }
             if (blocks.empty()) return false;
@@ -206,13 +209,13 @@ public:
         // overfeeds NetEq and makes A/V synchronization delay healthy video.
         if (stop.stop_requested()) return false;
         const auto now = std::chrono::steady_clock::now();
-        nextOutput_ += std::chrono::milliseconds(10);
+        nextOutput_ += kBlockDuration;
         if (nextOutput_ < now) nextOutput_ = now; // Never replay missed slots.
         while (!stop.stop_requested() && std::chrono::steady_clock::now() < nextOutput_) {
             const auto remaining = nextOutput_ - std::chrono::steady_clock::now();
             if (remaining > std::chrono::steady_clock::duration::zero())
                 outputTimer_.Wait(std::min(std::chrono::duration_cast<std::chrono::nanoseconds>(remaining),
-                    std::chrono::nanoseconds(std::chrono::milliseconds(10))));
+                    std::chrono::nanoseconds(kBlockDuration)));
         }
         if (stop.stop_requested()) return false;
         if (!request_) {
